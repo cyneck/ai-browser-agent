@@ -109,8 +109,25 @@ class ActionExecutor:
         # 创建Jinja2环境
         env = Environment(loader=FileSystemLoader(template_dir))
         
+        env.filters['extract_search_query'] = self._extract_search_query
+        env.filters['json_dumps'] = json.dumps
+        env.filters['b64encode'] = lambda s: base64.b64encode(s.encode('utf-8')).decode('utf-8')
+        env.filters['b64decode'] = lambda s: base64.b64decode(s.encode('utf-8')).decode('utf-8')
         return env
     
+    def _extract_search_query(self, instruction: Dict[str, Any]) -> str:
+        """从指令中提取搜索关键词"""
+        # 示例：假设搜索指令的 instruction.value 格式为 "在www.baidu.com上搜索今日新闻"
+        # 我们需要从中提取 "今日新闻"
+        search_instruction = instruction.get("value", "")
+        match = re.search(r'在(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s]*)?上搜索(.+)', search_instruction)
+        if match:
+            return match.group(1).strip()
+        
+        # 如果没有匹配到特定格式，则尝试直接返回整个 value 或者根据其他约定提取
+        # 这里可以根据实际的指令格式进行调整
+        return search_instruction
+
     def _create_basic_templates(self, template_dir: Path):
         """创建基本模板文件
         

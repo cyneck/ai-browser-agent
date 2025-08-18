@@ -1,7 +1,7 @@
 # 在输入框中输入文本
 try:
     element = page.locator("{{ instruction.selector }}")
-    element.fill("{{ instruction.value }}")
+    element.fill("{{ instruction | extract_search_query }}")
     result = {
         "success": True,
         "message": "成功在 {{ instruction.selector }} 中输入文本"

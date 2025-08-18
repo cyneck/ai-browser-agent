@@ -22,3 +22,196 @@
 2025-08-19 00:22:17 - ai_browser_agent - INFO - 浏览器代理资源已清理
 2025-08-19 00:27:22 - ai_browser_agent - WARNING - 挂载静态文件目录失败: Directory 'static' does not exist
 2025-08-19 00:27:22 - ai_browser_agent - INFO - 启动Web界面，地址: 127.0.0.1:8000
+2025-08-19 00:51:53 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:51:53 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:51:57 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:51:57 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:51:57 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:52:27 - ai_browser_agent - ERROR - 执行错误: name 'str' is not defined
+2025-08-19 00:52:27 - ai_browser_agent - INFO - 指令执行完成，耗时: 30.03秒
+2025-08-19 00:52:27 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:52:27 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:52:27 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:52:27 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 00:57:44 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:57:44 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:57:45 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:57:45 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:57:45 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:58:15 - ai_browser_agent - ERROR - 执行错误: name 'str' is not defined
+2025-08-19 00:58:15 - ai_browser_agent - INFO - 指令执行完成，耗时: 30.03秒
+2025-08-19 00:58:15 - ai_browser_agent - INFO - 分析页面: www.baidu.com (chrome-error://chromewebdata/)
+2025-08-19 00:58:15 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:58:15 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:58:15 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:58:25 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:58:25 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:58:25 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:58:47 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:59:11 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:11 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:12 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:12 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:59:12 - ai_browser_agent - ERROR - 渲染模板失败: ActionExecutor._extract_search_query() takes 2 positional arguments but 3 were given
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 指令执行完成，耗时: 0.00秒
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:12 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:59:12 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 00:59:14 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:14 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:15 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:15 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:59:15 - ai_browser_agent - ERROR - 渲染模板失败: ActionExecutor._extract_search_query() takes 2 positional arguments but 3 were given
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 指令执行完成，耗时: 0.00秒
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:15 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:59:15 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 00:59:25 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:25 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:26 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 00:59:26 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 00:59:26 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 00:59:56 - ai_browser_agent - ERROR - 执行错误: name 'str' is not defined
+2025-08-19 00:59:56 - ai_browser_agent - INFO - 指令执行完成，耗时: 30.03秒
+2025-08-19 00:59:56 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:59:56 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:59:56 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:59:56 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 01:00:19 - ai_browser_agent - INFO - 直接执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 01:00:19 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 01:00:20 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 01:00:20 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 01:00:20 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 01:00:28 - ai_browser_agent - ERROR - 执行错误: name 'str' is not defined
+2025-08-19 01:00:28 - ai_browser_agent - INFO - 指令执行完成，耗时: 7.55秒
+2025-08-19 01:00:28 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.title: Target page, context or browser has been closed
+2025-08-19 01:00:28 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 01:00:28 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 01:03:22 - ai_browser_agent - WARNING - 挂载静态文件目录失败: Directory 'static' does not exist
+2025-08-19 01:03:22 - ai_browser_agent - INFO - 启动Web界面，地址: 127.0.0.1:8000
+2025-08-19 01:03:32 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 01:03:32 - ai_browser_agent - ERROR - 初始化浏览器代理时发生错误: Executable doesn't exist at /Users/eric/Library/Caches/ms-playwright/chromium-1091/chrome-mac/Chromium.app/Contents/MacOS/Chromium
+╔════════════════════════════════════════════════════════════╗
+║ Looks like Playwright was just installed or updated.       ║
+║ Please run the following command to download new browsers: ║
+║                                                            ║
+║     playwright install                                     ║
+║                                                            ║
+║ <3 Playwright Team                                         ║
+╚════════════════════════════════════════════════════════════╝
+2025-08-19 01:03:32 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 01:03:32 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 01:04:17 - ai_browser_agent - WARNING - 挂载静态文件目录失败: Directory 'static' does not exist
+2025-08-19 01:04:17 - ai_browser_agent - INFO - 启动Web界面，地址: 127.0.0.1:8000
+2025-08-19 01:04:28 - ai_browser_agent - INFO - 启动chromium浏览器，headless=False
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 执行指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 01:04:29 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 构建指令: 在www.baidu.com上搜索今日新闻
+2025-08-19 01:04:29 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 执行指令: {"steps": [{"action": "type", "selector": "input[type=search]", "value": "{{extract_search_query(instruction)}}", "description": "在搜索框中输入搜索关键词"}, {"action": "click", "selector": "button[type=submit]", "description": "点击搜索按钮"}], "description": "执行搜索操作"}
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 开始执行多步操作: 执行搜索操作
+2025-08-19 01:04:29 - ai_browser_agent - INFO - 执行操作: type - 在搜索框中输入搜索关键词
+2025-08-19 01:04:59 - ai_browser_agent - ERROR - 执行错误: name 'str' is not defined
+2025-08-19 01:04:59 - ai_browser_agent - INFO - 指令执行完成，耗时: 30.03秒
+2025-08-19 01:04:59 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 01:04:59 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)

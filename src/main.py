@@ -57,6 +57,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--cli", action="store_true", help="启动命令行界面")
     group.add_argument("--web", action="store_true", help="启动Web界面")
+    parser.add_argument("--instruction", type=str, help="要执行的自然语言指令（仅在cli模式下有效，如果提供此参数，则直接执行指令并退出，不进入交互模式）")
     args = parser.parse_args()
     
     # 设置环境
@@ -64,7 +65,12 @@ def main():
     
     # 根据参数启动相应的界面
     if args.cli:
-        start_cli_mode()
+        if args.instruction:
+            from src.api.cli import CLIInterface
+            cli = CLIInterface()
+            cli.initialize_and_execute(args.instruction)
+        else:
+            start_cli_mode()
     elif args.web:
         host = config.get("WEB_HOST", "127.0.0.1")
         port = int(config.get("WEB_PORT", 8000))

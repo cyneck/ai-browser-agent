@@ -9,7 +9,8 @@
 
 import importlib
 import inspect
-import os\import pkgutil
+import os
+import pkgutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Callable, Type
 
