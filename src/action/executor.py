@@ -85,7 +85,7 @@ class ActionExecutor:
         except Exception:
             # 回退到固定集合（与创建模板一致）
             return [
-                "navigate", "click", "type", "select", "wait",
+                "navigate", "click", "fill", "select", "wait",
                 "screenshot", "extract", "scroll", "back", "forward",
                 "refresh", "close", "error"
             ]
