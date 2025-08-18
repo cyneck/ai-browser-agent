@@ -1,0 +1,14 @@
+# 点击元素
+try:
+    element = page.locator("{{ instruction.selector }}")
+    element.click()
+    result = {
+        "success": True,
+        "message": "成功点击元素 {{ instruction.selector }}"
+    }
+except Exception as e:
+    result = {
+        "success": False,
+        "message": "点击失败",
+        "error": str(e)
+    }

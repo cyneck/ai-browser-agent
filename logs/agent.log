@@ -1,0 +1,24 @@
+2025-08-19 00:16:27 - ai_browser_agent - INFO - 启动命令行界面
+2025-08-19 00:16:27 - ai_browser_agent - INFO - 启动chromium浏览器，headless=True
+2025-08-19 00:16:29 - ai_browser_agent - INFO - 浏览器代理初始化完成
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 执行指令: 京东网页
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 分析页面:  (about:blank)
+2025-08-19 00:16:48 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 构建指令: 京东网页
+2025-08-19 00:16:48 - ai_browser_agent - WARNING - GEMINI_API_KEY 未配置，使用模拟响应
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 指令构建完成
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 执行指令: {"action": "navigate", "value": "https://www.jd.com", "description": "导航到https://www.jd.com"}
+2025-08-19 00:16:48 - ai_browser_agent - INFO - 执行操作: navigate - 导航到https://www.jd.com
+2025-08-19 00:16:49 - ai_browser_agent - INFO - 指令执行完成，耗时: 0.67秒
+2025-08-19 00:16:49 - ai_browser_agent - INFO - 分析页面: 京东(JD.COM)-正品低价、品质保障、配送及时、轻松购物！ (https://www.jd.com/)
+2025-08-19 00:16:49 - ai_browser_agent - ERROR - 分析页面时发生错误: Page.evaluate: SyntaxError: Invalid or unexpected token
+    at eval (<anonymous>)
+    at UtilityScript.evaluate (<anonymous>:291:30)
+    at UtilityScript.<anonymous> (<anonymous>:1:44)
+2025-08-19 00:22:17 - ai_browser_agent - INFO - 清理浏览器代理资源
+2025-08-19 00:22:17 - ai_browser_agent - INFO - 浏览器代理资源已清理
+2025-08-19 00:27:22 - ai_browser_agent - WARNING - 挂载静态文件目录失败: Directory 'static' does not exist
+2025-08-19 00:27:22 - ai_browser_agent - INFO - 启动Web界面，地址: 127.0.0.1:8000

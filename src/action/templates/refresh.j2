@@ -1,0 +1,13 @@
+# 刷新页面
+try:
+    page.reload()
+    result = {
+        "success": True,
+        "message": "成功刷新页面"
+    }
+except Exception as e:
+    result = {
+        "success": False,
+        "message": "刷新页面失败",
+        "error": str(e)
+    }

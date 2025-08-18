@@ -1,0 +1,13 @@
+# 前进到下一页
+try:
+    page.go_forward()
+    result = {
+        "success": True,
+        "message": "成功前进到下一页"
+    }
+except Exception as e:
+    result = {
+        "success": False,
+        "message": "前进到下一页失败",
+        "error": str(e)
+    }

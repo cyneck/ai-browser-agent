@@ -1,0 +1,28 @@
+# 滚动页面
+try:
+    {% if instruction.selector %}
+    element = page.locator("{{ instruction.selector }}")
+    element.scroll_into_view_if_needed()
+    result = {
+        "success": True,
+        "message": "成功滚动到元素 {{ instruction.selector }}"
+    }
+    {% elif instruction.value %}
+    page.evaluate("window.scrollBy(0, {{ instruction.value }})")
+    result = {
+        "success": True,
+        "message": "成功滚动页面 {{ instruction.value }} 像素"
+    }
+    {% else %}
+    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+    result = {
+        "success": True,
+        "message": "成功滚动到页面底部"
+    }
+    {% endif %}
+except Exception as e:
+    result = {
+        "success": False,
+        "message": "滚动失败",
+        "error": str(e)
+    }
