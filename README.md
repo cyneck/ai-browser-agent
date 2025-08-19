@@ -195,5 +195,5 @@ mypy src
 
 如有问题或建议，请通过以下方式联系我们：
 
-- 项目负责人：Your Name - your.email@example.com
-- 项目仓库：https://github.com/yourusername/ai-browser-agent
+- 项目负责人：Eric - cyneck@qq.com
+- 项目仓库：https://github.com/cyneck/ai-browser-agent
