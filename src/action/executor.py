@@ -117,15 +117,10 @@ class ActionExecutor:
     
     def _extract_search_query(self, instruction: Dict[str, Any]) -> str:
         """从指令中提取搜索关键词"""
-        # 示例：假设搜索指令的 instruction.value 格式为 "在www.baidu.com上搜索今日新闻"
-        # 我们需要从中提取 "今日新闻"
         search_instruction = instruction.get("value", "")
         match = re.search(r'在(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s]*)?上搜索(.+)', search_instruction)
         if match:
             return match.group(1).strip()
-        
-        # 如果没有匹配到特定格式，则尝试直接返回整个 value 或者根据其他约定提取
-        # 这里可以根据实际的指令格式进行调整
         return search_instruction
 
     def _create_basic_templates(self, template_dir: Path):
@@ -169,8 +164,8 @@ except Exception as e:
     }
 """
         
-        # 输入模板
-        type_template = """
+        # 填充模板（填充输入框）
+        fill_template = """
 # 在输入框中输入文本
 try:
     element = page.locator("{{ instruction.selector }}")
@@ -398,7 +393,7 @@ result = {
         templates = {
             "navigate.j2": navigate_template,
             "click.j2": click_template,
-            "type.j2": type_template,
+            "fill.j2": fill_template,
             "select.j2": select_template,
             "wait.j2": wait_template,
             "screenshot.j2": screenshot_template,
@@ -419,15 +414,7 @@ result = {
         """设置执行命名空间"""
         # 基本工具函数
         def ask_user(prompt: str, password: bool = False) -> str:
-            """向用户请求输入
-            
-            Args:
-                prompt: 提示信息
-                password: 是否是密码输入
-                
-            Returns:
-                str: 用户输入
-            """
+            """向用户请求输入"""
             if password:
                 import getpass
                 return getpass.getpass(prompt)
@@ -435,15 +422,7 @@ result = {
                 return input(prompt)
         
         def extract_search_query(instruction: str) -> str:
-            """从指令中提取搜索关键词
-            
-            Args:
-                instruction: 用户指令
-                
-            Returns:
-                str: 搜索关键词
-            """
-            # 简单实现，实际应该使用更复杂的NLP方法
+            """从指令中提取搜索关键词"""
             search_patterns = [
                 r"搜索[\s]*([^\n]+)",
                 r"查找[\s]*([^\n]+)",
@@ -472,15 +451,7 @@ result = {
         })
     
     def _execute_multi_steps(self, instruction: Dict[str, Any], timeout: int) -> Dict[str, Any]:
-        """执行多步操作
-        
-        Args:
-            instruction: 包含多步操作的指令
-            timeout: 执行超时时间（秒）
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
+        """执行多步操作"""
         steps = instruction.get("steps", [])
         description = instruction.get("description", "执行多步操作")
         
@@ -525,23 +496,20 @@ result = {
         return result
     
     def _execute_single_action(self, instruction: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
-        """执行单步操作
-        
-        Args:
-            instruction: 单步操作指令
-            timeout: 执行超时时间（秒）
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
+        """执行单步操作"""
         action = instruction.get("action")
         description = instruction.get("description", f"执行{action}操作")
         
         self.logger.info(f"执行操作: {action} - {description}")
         
+        # 模板别名映射（兼容历史 action）
+        action_template_name = action
+        if action == "type":
+            action_template_name = "fill"
+        
         # 获取对应的模板
         try:
-            template = self.template_env.get_template(f"{action}.j2")
+            template = self.template_env.get_template(f"{action_template_name}.j2")
         except Exception as e:
             self.logger.error(f"获取模板失败: {str(e)}")
             return {
@@ -563,20 +531,13 @@ result = {
         
         # 执行代码
         try:
-            # 设置局部变量result，用于存储执行结果
             local_vars = {}
-            
-            # 执行代码
             exec(code, self.execution_namespace, local_vars)
-            
-            # 获取执行结果
             result = local_vars.get("result", {
                 "success": False,
                 "message": "执行代码未返回结果",
                 "error": "未知错误"
             })
-            
-            # 简单状态写回（可选）
             if isinstance(result, dict) and result.get("success"):
                 self.state_manager.set_state("last_action", action)
                 self.state_manager.set_state("last_message", result.get("message"))

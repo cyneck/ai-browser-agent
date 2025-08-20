@@ -9,6 +9,7 @@
 
 import json
 import os
+import re
 from typing import Dict, Any, List, Optional
 
 # 可选导入 Gemini SDK，测试可通过打桩替换
@@ -23,44 +24,45 @@ from src.common.logger import get_logger
 
 class InstructionBuilder:
     """指令构建器类，负责构建标准化的JSON格式指令"""
-    
+
     def __init__(self):
         """初始化指令构建器"""
         self.logger = get_logger()
         self.api_key = get_config("GEMINI_API_KEY")
         self.allowed_domains = get_config("ALLOWED_DOMAINS", "*")
-    
-    def build(self, user_instruction: str, page_data: Dict[str, Any], 
+
+    def build(self, user_instruction: str, page_data: Dict[str, Any],
               session_state: Dict[str, Any]) -> Dict[str, Any]:
-        """构建标准化的JSON格式指令
-        
-        Args:
-            user_instruction: 用户的自然语言指令
-            page_data: 页面意图图谱
-            session_state: 会话状态
-            
-        Returns:
-            Dict[str, Any]: 标准化的JSON格式指令
-        """
+        """构建标准化的JSON格式指令"""
         try:
             self.logger.info(f"构建指令: {user_instruction}")
-            
+
+            # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
+            if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
+                nav_only = self._maybe_build_navigation_first(user_instruction)
+                if nav_only:
+                    return nav_only
+                # 如果没有明确URL，则使用 Bing 前置检索
+                bing_pre_search = self._build_bing_pre_search(user_instruction)
+                if bing_pre_search:
+                    return bing_pre_search
+
             # 提取对话历史
             conversation_history = session_state.get("conversation_history", [])
-            
+
             # 构建提示词
             prompt = self._build_prompt(
                 user_instruction,
                 page_data,
                 conversation_history
             )
-            
+
             # 调用LLM生成指令
             json_instruction = self._call_llm(prompt)
-            
+
             # 验证指令格式
             validated_instruction = self._validate_instruction(json_instruction, page_data)
-            
+
             # 更新对话历史
             conversation_history.append({
                 "role": "user",
@@ -70,14 +72,14 @@ class InstructionBuilder:
                 "role": "assistant",
                 "content": json.dumps(validated_instruction)
             })
-            
+
             # 限制对话历史长度
             if len(conversation_history) > 10:
                 conversation_history = conversation_history[-10:]
-            
+
             # 更新会话状态
             session_state["conversation_history"] = conversation_history
-            
+
             self.logger.info("指令构建完成")
             return validated_instruction
         except Exception as e:
@@ -88,20 +90,10 @@ class InstructionBuilder:
                 "error": str(e),
                 "original_instruction": user_instruction
             }
-    
+
     def _build_prompt(self, user_instruction: str, page_data: Dict[str, Any],
-                     conversation_history: List[Dict[str, str]]) -> str:
-        """构建提示词
-        
-        Args:
-            user_instruction: 用户的自然语言指令
-            page_data: 页面意图图谱
-            conversation_history: 对话历史
-            
-        Returns:
-            str: 提示词
-        """
-        # 构建系统提示词
+                      conversation_history: List[Dict[str, str]]) -> str:
+        """构建提示词"""
         system_prompt = """
         你是一个专业的网页自动化助手，负责将用户的自然语言指令转换为标准化的JSON格式指令。
         
@@ -113,7 +105,7 @@ class InstructionBuilder:
         你必须严格按照以下JSON格式输出指令：
         ```json
         {
-            "action": "操作类型",  // 必需字段，如navigate, click, type, select等
+            "action": "操作类型",  // 必需字段，如navigate, click, fill, select等
             "selector": "元素选择器",  // 可选字段，取决于操作类型
             "value": "输入值",  // 可选字段，取决于操作类型
             "description": "操作描述"  // 必需字段，描述此操作的目的
@@ -142,9 +134,9 @@ class InstructionBuilder:
         ```
         
         支持的操作类型包括：
-        - navigate: 导航到指定URL
+        - navigate: 导航到指定URL（必须是带 http/https 的绝对URL，如 https://example.com）
         - click: 点击元素
-        - type: 在输入框中输入文本
+        - fill: 在输入框中输入文本
         - select: 在下拉菜单中选择选项
         - wait: 等待指定时间或元素出现
         - screenshot: 截取屏幕截图
@@ -156,10 +148,13 @@ class InstructionBuilder:
         - close: 关闭当前页面
         - error: 表示无法执行用户指令
         
-        请确保你的输出是有效的JSON格式，并且包含所有必需的字段。
+        重要：
+        - 如果你判断用户意图需要先访问某个站点，但当前页面信息不足，请只返回前置 navigate+wait 步骤。
+        - 如果当前已处在目标页面，请不要再次包含 navigate 操作。
+        - 生成选择器时，优先依据页面结构、ARIA信息、稳定属性（如 data-*），避免脆弱的纯文本定位。
+        - 返回的JSON必须严格合法，不要包含注释或无关文本。
         """
-        
-        # 构建用户提示词
+
         user_prompt = f"""
         当前页面信息：
         URL: {page_data.get('url', 'N/A')}
@@ -172,207 +167,163 @@ class InstructionBuilder:
         页面上的功能区域：
         {json.dumps(page_data.get('functional_areas', []), ensure_ascii=False, indent=2)}
         
+        ARIA 概览（可选）：
+        {json.dumps(page_data.get('aria_snapshot') or {}, ensure_ascii=False)[:800]}
+        
         用户指令: {user_instruction}
         
         请根据用户指令和页面信息，生成标准化的JSON格式指令。
         """
-        
-        # 如果有对话历史，添加到提示词中
+
         if conversation_history:
             conversation_context = "\n对话历史:\n"
-            for message in conversation_history[-4:]:  # 只使用最近的4条消息
+            for message in conversation_history[-4:]:
                 role = "用户" if message["role"] == "user" else "助手"
                 conversation_context += f"{role}: {message['content']}\n"
             user_prompt = conversation_context + "\n" + user_prompt
-        
-        # Gemini 使用纯文本提示，将系统提示与用户上下文拼接
-        return system_prompt + "\n\n" + user_prompt
-    
-    def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """调用LLM生成指令
-        
-        Args:
-            prompt: 提示词
-            
-        Returns:
-            Dict[str, Any]: 生成的JSON格式指令
-        """
-        # 如果未配置API Key，降级为内置规则响应
-        if not self.api_key:
-            self.logger.warning("GEMINI_API_KEY 未配置，使用模拟响应")
-            return self._mock_response(prompt)
 
+        return system_prompt + "\n\n" + user_prompt
+
+    def _detect_navigation_intent_and_url(self, user_instruction: str) -> Optional[str]:
+        """识别导航意图并提取规范化 URL。
+        规则：优先匹配显式 http/https；否则匹配裸域（ASCII 顶级域），忽略周边中文词缀（如“访问”“网站”）。
+        """
+        # 1) 显式 URL（http/https）
+        m = re.search(r"https?://[A-Za-z0-9.-]+(?:\.[A-Za-z]{2,24})(?:/[^\s]*)?", user_instruction)
+        if m:
+            return m.group(0)
+        # 2) 裸域（仅ASCII域名与TLD），避免把中文词缀合入
+        m2 = re.search(r"(?<![A-Za-z0-9.-])([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24})(?![A-Za-z0-9.-])",
+                       user_instruction)
+        if m2:
+            return "https://" + m2.group(1)
+        return None
+
+    @staticmethod
+    def _extract_code_blocks(text: str, language: str = '') -> List[str]:
+        """
+        提取字符串中的代码块
+
+        Args:
+            text (str): 包含代码块的字符串
+            language (str, optional): 指定代码块的语言（如 'json'）。默认为空，匹配所有代码块。
+
+        Returns:
+            list: 提取到的代码块列表（已去除前后空白字符）
+        """
+        lang = re.escape(language)
+        # 允许 ```json 换行后开始，大小写不敏感
+        pattern = re.compile(rf"```{lang}\s*\n(.*?)```", re.DOTALL | re.IGNORECASE) if language else re.compile(r"```\s*\n(.*?)```", re.DOTALL)
+        matches = pattern.findall(text or "")
+        return [match.strip() for match in matches]
+
+    def _maybe_build_navigation_first(self, user_instruction: str) -> Optional[Dict[str, Any]]:
+        """在页面为空时，尝试仅生成导航步骤（URL 直达）。"""
+        url = self._detect_navigation_intent_and_url(user_instruction)
+        if not url:
+            return None
         try:
-            if genai is None:
-                raise RuntimeError("Gemini SDK 未安装")
+            self._validate_url_safety(url)
+        except Exception as e:
+            self.logger.warning(f"URL 不在允许域名范围内: {url} - {e}")
+            return {"action": "error", "error": str(e)}
+        return {
+            "steps": [
+                {"action": "navigate", "value": url, "description": f"导航到 {url}"},
+                {"action": "wait", "value": 2000, "description": "等待页面就绪(2秒)"}
+            ],
+            "description": f"前置导航到 {url} 并等待页面加载"
+        }
+
+    def _build_bing_pre_search(self, user_instruction: str) -> Dict[str, Any]:
+        """当无法直达 URL 时，先在 Bing 搜索预检索站点/意图。"""
+        from urllib.parse import quote_plus
+        query = quote_plus(user_instruction.strip())
+        url = f"https://www.bing.com/search?q={query}"
+        try:
+            self._validate_url_safety(url)
+        except Exception as e:
+            return {"action": "error", "error": str(e)}
+        return {
+            "steps": [
+                {"action": "navigate", "value": url, "description": f"在Bing搜索：{user_instruction}"},
+                {"action": "wait", "value": 2000, "description": "等待搜索结果加载(2秒)"}
+            ],
+            "description": "前置导航到Bing进行检索"
+        }
+
+    def _call_llm(self, prompt: str) -> Dict[str, Any]:
+        """调用LLM生成指令"""
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY 未配置")
+        if genai is None:
+            raise RuntimeError("Gemini SDK 未安装")
+        try:
             genai.configure(api_key=self.api_key)
             model_name = get_config("GEMINI_MODEL", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
             resp = model.generate_content(prompt)
             text = getattr(resp, "text", "") or ""
-            # 期望模型直接输出 JSON；若非 JSON，回退到错误
             try:
+                blocks = self._extract_code_blocks(text, "json")
+                if blocks:
+                    text = blocks[0]
                 return json.loads(text)
             except Exception:
-                return {"action": "error", "error": "LLM未返回有效JSON", "raw": text[:500]}
+                return {"action": "error", "error": "LLM未返回有效JSON", "raw": (text or "")[:500]}
         except Exception as e:
             self.logger.error(f"调用Gemini失败: {e}")
             return {"action": "error", "error": str(e)}
 
-    def _mock_response(self, prompt: str) -> Dict[str, Any]:
-        # 模拟响应
-        if "登录" in prompt or "login" in prompt.lower():
-            return {
-                "steps": [
-                    {
-                        "action": "type",
-                        "selector": "input[name=username]",
-                        "value": "{{ask_user('请输入用户名')}}",
-                        "description": "在用户名输入框中输入用户名"
-                    },
-                    {
-                        "action": "type",
-                        "selector": "input[name=password]",
-                        "value": "{{ask_user('请输入密码', password=True)}}",
-                        "description": "在密码输入框中输入密码"
-                    },
-                    {
-                        "action": "click",
-                        "selector": "button[type=submit]",
-                        "description": "点击登录按钮"
-                    }
-                ],
-                "description": "完成登录流程"
-            }
-        elif "搜索" in prompt or "search" in prompt.lower():
-            return {
-                "steps": [
-                    {
-                        "action": "type",
-                        "selector": "input[type=search]",
-                        "value": "{{extract_search_query(instruction)}}",
-                        "description": "在搜索框中输入搜索关键词"
-                    },
-                    {
-                        "action": "click",
-                        "selector": "button[type=submit]",
-                        "description": "点击搜索按钮"
-                    }
-                ],
-                "description": "执行搜索操作"
-            }
-        elif "导航" in prompt or "navigate" in prompt.lower() or "打开" in prompt or "访问" in prompt:
-            url = "https://example.com"
-            if "京东" in prompt or "jd" in prompt.lower():
-                url = "https://www.jd.com"
-            elif "淘宝" in prompt or "taobao" in prompt.lower():
-                url = "https://www.taobao.com"
-            
-            return {
-                "action": "navigate",
-                "value": url,
-                "description": f"导航到{url}"
-            }
-        else:
-            return {
-                "action": "error",
-                "error": "无法理解用户指令",
-                "description": "请提供更明确的指令"
-            }
-    
-    def _validate_instruction(self, instruction: Dict[str, Any], 
-                             page_data: Dict[str, Any]) -> Dict[str, Any]:
-        """验证指令格式和安全性
-        
-        Args:
-            instruction: 生成的JSON格式指令
-            page_data: 页面意图图谱
-            
-        Returns:
-            Dict[str, Any]: 验证后的指令
-        """
-        # 验证指令格式
+    def _validate_instruction(self, instruction: Dict[str, Any],
+                              page_data: Dict[str, Any]) -> Dict[str, Any]:
+        """验证指令格式和安全性"""
         if "action" not in instruction and "steps" not in instruction:
             raise ValueError("指令缺少必需的'action'或'steps'字段")
-        
-        # 如果是多步操作，验证每一步
         if "steps" in instruction:
             for i, step in enumerate(instruction["steps"]):
                 if "action" not in step:
-                    raise ValueError(f"第{i+1}步操作缺少必需的'action'字段")
-                
-                # 验证操作类型
+                    raise ValueError(f"第{i + 1}步操作缺少必需的'action'字段")
                 if step["action"] not in [
-                    "navigate", "click", "type", "select", "wait", 
-                    "screenshot", "extract", "scroll", "back", 
+                    "navigate", "click", "fill", "select", "wait",
+                    "screenshot", "extract", "scroll", "back",
                     "forward", "refresh", "close", "error"
                 ]:
-                    raise ValueError(f"第{i+1}步操作的类型'{step['action']}'不受支持")
-                
-                # 验证必需的字段
+                    raise ValueError(f"第{i + 1}步操作的类型'{step['action']}'不受支持")
                 if step["action"] == "navigate" and "value" not in step:
-                    raise ValueError(f"第{i+1}步'navigate'操作缺少必需的'value'字段")
-                
-                if step["action"] in ["click", "type", "select"] and "selector" not in step:
-                    raise ValueError(f"第{i+1}步'{step['action']}'操作缺少必需的'selector'字段")
-                
-                if step["action"] in ["type", "select"] and "value" not in step:
-                    raise ValueError(f"第{i+1}步'{step['action']}'操作缺少必需的'value'字段")
-                
-                # 验证URL安全性
+                    raise ValueError(f"第{i + 1}步'navigate'操作缺少必需的'value'字段")
+                if step["action"] in ["click", "fill", "select"] and "selector" not in step:
+                    raise ValueError(f"第{i + 1}步'{step['action']}'操作缺少必需的'selector'字段")
+                if step["action"] in ["fill", "select"] and "value" not in step:
+                    raise ValueError(f"第{i + 1}步'{step['action']}'操作缺少必需的'value'字段")
                 if step["action"] == "navigate":
                     self._validate_url_safety(step["value"])
         else:
-            # 单步操作
-            # 验证操作类型
             if instruction["action"] not in [
-                "navigate", "click", "type", "select", "wait", 
-                "screenshot", "extract", "scroll", "back", 
+                "navigate", "click", "fill", "select", "wait",
+                "screenshot", "extract", "scroll", "back",
                 "forward", "refresh", "close", "error"
             ]:
                 raise ValueError(f"操作类型'{instruction['action']}'不受支持")
-            
-            # 验证必需的字段
             if instruction["action"] == "navigate" and "value" not in instruction:
                 raise ValueError("'navigate'操作缺少必需的'value'字段")
-            
-            if instruction["action"] in ["click", "type", "select"] and "selector" not in instruction:
+            if instruction["action"] in ["click", "fill", "select"] and "selector" not in instruction:
                 raise ValueError(f"'{instruction['action']}'操作缺少必需的'selector'字段")
-            
-            if instruction["action"] in ["type", "select"] and "value" not in instruction:
+            if instruction["action"] in ["fill", "select"] and "value" not in instruction:
                 raise ValueError(f"'{instruction['action']}'操作缺少必需的'value'字段")
-            
-            # 验证URL安全性
             if instruction["action"] == "navigate":
                 self._validate_url_safety(instruction["value"])
-        
         return instruction
-    
+
     def _validate_url_safety(self, url: str):
-        """验证URL安全性
-        
-        Args:
-            url: 要验证的URL
-            
-        Raises:
-            ValueError: 如果URL不安全
-        """
-        # 如果允许所有域名，直接返回
+        """验证URL安全性"""
         if self.allowed_domains == "*":
             return
-        
-        # 检查URL是否在允许的域名列表中
         from urllib.parse import urlparse
         parsed_url = urlparse(url)
         domain = parsed_url.netloc
-        
-        # 提取主域名
         domain_parts = domain.split('.')
         if len(domain_parts) > 2:
             main_domain = '.'.join(domain_parts[-2:])
         else:
             main_domain = domain
-        
-        # 检查域名是否在允许列表中
-        if main_domain not in self.allowed_domains:
-            raise ValueError(f"域名'{main_domain}'不在允许的域名列表中")
