@@ -47,6 +47,11 @@ class InstructionBuilder:
                 if bing_pre_search:
                     return bing_pre_search
 
+            # 在已加载页面上，尝试已知站点的启发式动作（如搜索框操作）
+            known = self._maybe_build_known_site_action(user_instruction, page_data)
+            if known:
+                return known
+
             # 提取对话历史
             conversation_history = session_state.get("conversation_history", [])
 
@@ -151,6 +156,7 @@ class InstructionBuilder:
         重要：
         - 如果你判断用户意图需要先访问某个站点，但当前页面信息不足，请只返回前置 navigate+wait 步骤。
         - 如果当前已处在目标页面，请不要再次包含 navigate 操作。
+        - 当 elements/ARIA 等上下文为空时，仍需给出可执行的最佳猜测选择器（例如常见站点的通用选择器），避免返回 error。
         - 生成选择器时，优先依据页面结构、ARIA信息、稳定属性（如 data-*），避免脆弱的纯文本定位。
         - 返回的JSON必须严格合法，不要包含注释或无关文本。
         """
@@ -212,7 +218,6 @@ class InstructionBuilder:
             list: 提取到的代码块列表（已去除前后空白字符）
         """
         lang = re.escape(language)
-        # 允许 ```json 换行后开始，大小写不敏感
         pattern = re.compile(rf"```{lang}\s*\n(.*?)```", re.DOTALL | re.IGNORECASE) if language else re.compile(r"```\s*\n(.*?)```", re.DOTALL)
         matches = pattern.findall(text or "")
         return [match.strip() for match in matches]
@@ -251,6 +256,57 @@ class InstructionBuilder:
             ],
             "description": "前置导航到Bing进行检索"
         }
+
+    def _intent_is_search(self, instruction: str) -> bool:
+        return bool(re.search(r"(搜索|查询|找|news|search)", instruction, re.IGNORECASE))
+
+    def _extract_query_from_instruction(self, instruction: str) -> str:
+        m = re.search(r"(?:搜索|查询|找)(.+)", instruction)
+        if m:
+            return m.group(1).strip().strip("'\"")
+        return instruction.strip().strip("'\"")
+
+    def _maybe_build_known_site_action(self, user_instruction: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """在已知站点（如百度/Bing/Google）上生成搜索动作的启发式步骤。"""
+        try:
+            if not self._intent_is_search(user_instruction):
+                return None
+            url = (page_data or {}).get("url") or ""
+            host = ""
+            if url:
+                m = re.search(r"://([^/]+)/?", url)
+                if m:
+                    host = m.group(1).lower()
+            if not host:
+                return None
+            query = self._extract_query_from_instruction(user_instruction)
+            steps: List[Dict[str, Any]] = []
+            # 百度
+            if "baidu.com" in host:
+                steps = [
+                    {"action": "wait", "selector": "id=kw", "timeout": 5000, "description": "等待搜索框出现"},
+                    {"action": "fill", "selector": "id=kw", "value": query, "description": f"在百度搜索框输入 '{query}'"},
+                    {"action": "click", "selector": "id=su", "description": "点击百度搜索按钮"}
+                ]
+            # Bing
+            elif "bing.com" in host:
+                steps = [
+                    {"action": "wait", "selector": "input[name=q]", "timeout": 5000, "description": "等待搜索框出现"},
+                    {"action": "fill", "selector": "input[name=q]", "value": query, "description": f"在Bing搜索框输入 '{query}'"},
+                    {"action": "click", "selector": "#sb_form_go", "description": "点击Bing搜索按钮"}
+                ]
+            # Google
+            elif "google." in host:
+                steps = [
+                    {"action": "wait", "selector": "textarea[name=q]", "timeout": 5000, "description": "等待搜索框出现"},
+                    {"action": "fill", "selector": "textarea[name=q]", "value": query, "description": f"在Google搜索框输入 '{query}'"},
+                    {"action": "click", "selector": "input[name=btnK]", "description": "点击Google搜索按钮"}
+                ]
+            else:
+                return None
+            return {"steps": steps, "description": f"站内搜索: {query}"}
+        except Exception:
+            return None
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
         """调用LLM生成指令"""
