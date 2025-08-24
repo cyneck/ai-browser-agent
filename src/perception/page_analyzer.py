@@ -219,33 +219,15 @@ class PageAnalyzer:
                 () => {
                     // 获取body元素
                     const body = document.body;
+                    if (!body) return '';
                     
-                    // 创建一个函数来递归提取文本
-                    function extractText(element, depth = 0) {
-                        if (!element) return '';
-                        
-                        // 忽略脚本和样式元素
-                        if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') {
-                            return '';
-                        }
-                        
-                        // 如果是文本节点，返回其文本内容
-                        if (element.nodeType === Node.TEXT_NODE) {
-                            const text = element.textContent.trim();
-                            return text ? text + '\n' : '';
-                        }
-                        
-                        // 如果是元素节点，递归提取其子节点的文本
-                        let text = '';
-                        for (const child of element.childNodes) {
-                            text += extractText(child, depth + 1);
-                        }
-                        
-                        return text;
-                    }
+                    // 使用更简单的方法提取所有文本内容
+                    let text = body.innerText || body.textContent || '';
                     
-                    // 提取body的文本
-                    return extractText(body).trim();
+                    // 清理多余的空格和换行
+                    text = text.replace(/\s+/g, ' ').trim();
+                    
+                    return text;
                 }
                 """
             )
