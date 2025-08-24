@@ -20,32 +20,61 @@ class ARIASnapshotExamples:
         self.context = None
         self.page = None
     
-    def setup(self):
-        """Initialize Playwright browser"""
+    def setup(self, headless: bool = False, slow_mo: int = 0):
+        """Initialize Playwright browser with configurable options
+        
+        Args:
+            headless: Whether to run browser in headless mode
+            slow_mo: Slow down operations by this many milliseconds
+        """
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(headless=False)
+        self.browser = self.playwright.chromium.launch(
+            headless=headless,
+            slow_mo=slow_mo,
+            devtools=not headless  # Open devtools in non-headless mode
+        )
         self.context = self.browser.new_context()
         self.page = self.context.new_page()
+        
+        # Enable console logging
+        self.page.on("console", lambda msg: print(f"🖥️  Browser Console: {msg.text}"))
+        
+        print(f"✅ Setup complete - Headless: {headless}, SlowMo: {slow_mo}ms")
     
     def cleanup(self):
         """Clean up resources"""
         if self.browser:
-            self.browser.close()
+            try:
+                self.browser.close()
+            except Exception as e:
+                print(f"⚠️  Error closing browser: {e}")
         if self.playwright:
-            self.playwright.stop()
+            try:
+                self.playwright.stop()
+            except Exception as e:
+                print(f"⚠️  Error stopping Playwright: {e}")
     
-    def basic_aria_snapshot(self, url: str) -> Dict[str, Any]:
+    def basic_aria_snapshot(self, url: str, timeout: int = 60000) -> Dict[str, Any]:
         """
         Basic ARIA snapshot usage - gets the full accessibility tree
         
         Args:
             url: The URL to analyze
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             Dict containing the ARIA snapshot
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         # Get the complete ARIA snapshot
         snapshot = self.page.accessibility.snapshot()
@@ -55,18 +84,27 @@ class ARIASnapshotExamples:
         
         return snapshot
     
-    def filtered_aria_snapshot(self, url: str) -> Dict[str, Any]:
+    def filtered_aria_snapshot(self, url: str, timeout: int = 60000) -> Dict[str, Any]:
         """
         Get ARIA snapshot with filtering options
         
         Args:
             url: The URL to analyze
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             Filtered ARIA snapshot
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         # Get snapshot with only interesting nodes (interactive elements)
         snapshot = self.page.accessibility.snapshot(
@@ -74,24 +112,32 @@ class ARIASnapshotExamples:
             root=None  # Start from document root
         )
         
-        print(f"Filtered ARIA Snapshot for {url}:")
-        print(json.dumps(snapshot, indent=2, ensure_ascii=False))
+        print(f"Filtered ARIA Snapshot for {url}: {json.dumps(snapshot, ensure_ascii=False)[:100]}...")
         
         return snapshot
     
-    def specific_element_aria_snapshot(self, url: str, selector: str) -> Dict[str, Any]:
+    def specific_element_aria_snapshot(self, url: str, selector: str, timeout: int = 60000) -> Dict[str, Any]:
         """
         Get ARIA snapshot for a specific element
         
         Args:
             url: The URL to analyze
             selector: CSS selector for the element to analyze
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             ARIA snapshot of the specific element
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         # Find the specific element
         element = self.page.locator(selector).first
@@ -99,23 +145,31 @@ class ARIASnapshotExamples:
         # Get ARIA snapshot for just this element
         snapshot = self.page.accessibility.snapshot(root=element.element_handle())
         
-        print(f"ARIA Snapshot for element '{selector}' on {url}:")
-        print(json.dumps(snapshot, indent=2, ensure_ascii=False))
+        print(f"ARIA Snapshot for element '{selector}' on {url}: {json.dumps(snapshot, ensure_ascii=False)[:100]}...")
         
         return snapshot
     
-    def find_interactive_elements(self, url: str) -> List[Dict[str, Any]]:
+    def find_interactive_elements(self, url: str, timeout: int = 60000) -> List[Dict[str, Any]]:
         """
         Use ARIA snapshot to find all interactive elements
         
         Args:
             url: The URL to analyze
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             List of interactive elements found
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         snapshot = self.page.accessibility.snapshot(interesting_only=True)
         
@@ -154,19 +208,28 @@ class ARIASnapshotExamples:
         
         return interactive_elements
     
-    def find_elements_by_role(self, url: str, target_role: str) -> List[Dict[str, Any]]:
+    def find_elements_by_role(self, url: str, target_role: str, timeout: int = 60000) -> List[Dict[str, Any]]:
         """
         Find all elements with a specific ARIA role
         
         Args:
             url: The URL to analyze
             target_role: The ARIA role to search for (e.g., "button", "link", "textbox")
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             List of elements with the target role
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         snapshot = self.page.accessibility.snapshot(interesting_only=True)
         
@@ -198,30 +261,41 @@ class ARIASnapshotExamples:
         
         return matching_elements
     
-    def create_selector_from_aria(self, url: str, target_name: str) -> str:
+    def create_selector_from_aria(self, url: str, target_name: str, timeout: int = 60000) -> str:
         """
         Create a robust selector using ARIA information
         
         Args:
             url: The URL to analyze
             target_name: The accessible name of the element to find
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             A selector string that can be used with Playwright
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         snapshot = self.page.accessibility.snapshot(interesting_only=True)
         
         def find_element_info(node: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            """Find element info by accessible name"""
+            """Recursively find element info by accessible name"""
             if not node:
                 return None
             
+            # Check if this is the element we're looking for
             if node.get("name", "").lower() == target_name.lower():
                 return node
             
+            # Recursively check children
             for child in node.get("children", []):
                 result = find_element_info(child)
                 if result:
@@ -241,7 +315,7 @@ class ARIASnapshotExamples:
         selectors = []
         
         # ARIA role selector
-        if role:
+        if role and name:
             selectors.append(f"page.get_by_role('{role}', name='{name}')")
         
         # Accessible name selector
@@ -255,18 +329,27 @@ class ARIASnapshotExamples:
         print(f"Suggested selector for '{target_name}': {selector}")
         return selector
     
-    def analyze_form_structure(self, url: str) -> Dict[str, Any]:
+    def analyze_form_structure(self, url: str, timeout: int = 60000) -> Dict[str, Any]:
         """
         Analyze form structure using ARIA snapshot
         
         Args:
             url: The URL to analyze
+            timeout: Maximum time to wait for page load (ms)
             
         Returns:
             Form structure information
         """
-        self.page.goto(url)
-        self.page.wait_for_load_state("networkidle")
+        print(f"Navigating to {url}")
+        self.page.goto(url, timeout=timeout)
+        
+        # First wait for DOM to load
+        self.page.wait_for_load_state("domcontentloaded")
+        print("Page DOM loaded")
+        
+        # Then wait a bit more for JS to settle
+        self.page.wait_for_timeout(5000)
+        print("Additional wait completed")
         
         snapshot = self.page.accessibility.snapshot(interesting_only=True)
         
@@ -323,11 +406,11 @@ class ARIASnapshotExamples:
 
 
 def demo_usage():
-    """Demonstrate ARIA snapshot usage"""
+    """Demonstrate ARIA snapshot usage examples"""
     examples = ARIASnapshotExamples()
     
     try:
-        examples.setup()
+        examples.setup(headless=True, slow_mo=0)  # Run in headless mode by default
         
         # Example 1: Basic ARIA snapshot
         print("=== Basic ARIA Snapshot ===")
@@ -353,7 +436,3 @@ def demo_usage():
         
     finally:
         examples.cleanup()
-
-
-if __name__ == "__main__":
-    demo_usage()

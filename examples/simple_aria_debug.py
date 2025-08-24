@@ -101,7 +101,7 @@ def debug_jd_full_snapshot():
         # Save snapshot to file for detailed analysis
         import json
         import time
-        filename = f"jd_snapshot_{int(time.time())}.json"
+        filename = f"jd_debug_{int(time.time())}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2, ensure_ascii=False)
         print(f"\n💾 Full snapshot saved to: {filename}")
@@ -120,53 +120,63 @@ def debug_specific_website(url):
     try:
         examples.setup()
         
-        # Get page info
-        examples.page.goto(url)
-        examples.page.wait_for_load_state("networkidle")
+        # Get page info with custom timeout
+        print(f"Navigating to {url}")
+        examples.page.goto(url, timeout=60000)  # Increased timeout to 60 seconds
+        
+        # Wait for initial page load but don't wait for all network activity
+        examples.page.wait_for_load_state("domcontentloaded")  # Changed from networkidle to domcontentloaded
+        print("Page DOM loaded")
+        
+        # Wait a bit more for JavaScript to settle
+        examples.page.wait_for_timeout(5000)  # Wait 5 seconds for JS to settle
         
         title = examples.page.title()
         print(f"📄 Page Title: {title}")
         
         # Find interactive elements
-        interactive = examples.find_interactive_elements(url)
-        
-        # Group by role
-        by_role = {}
-        for elem in interactive:
-            role = elem.get('role', 'unknown')
-            if role not in by_role:
-                by_role[role] = 0
-            by_role[role] += 1
-        
-        print(f"\n📊 Interactive elements summary:")
-        for role, count in sorted(by_role.items()):
-            print(f"  {role}: {count}")
-        
-        # Try common element searches
-        print(f"\n🔍 Looking for common elements:")
-        
-        # Search boxes
-        search_boxes = examples.find_elements_by_role(url, "searchbox")
-        textboxes = examples.find_elements_by_role(url, "textbox")
-        print(f"  Search boxes: {len(search_boxes)}")
-        print(f"  Text inputs: {len(textboxes)}")
-        
-        # Buttons
-        buttons = examples.find_elements_by_role(url, "button")
-        print(f"  Buttons: {len(buttons)}")
-        
-        # Links
-        links = examples.find_elements_by_role(url, "link")
-        print(f"  Links: {len(links)}")
-        
-        if search_boxes or textboxes:
-            search_elements = search_boxes + textboxes
-            first_search = search_elements[0]
-            search_name = first_search.get('name', 'search')
-            print(f"\n🎯 Creating selector for search element: '{search_name}'")
-            selector = examples.create_selector_from_aria(url, search_name)
-            print(f"   Selector: {selector}")
-        
+        try:
+            interactive = examples.find_interactive_elements(url)
+            
+            # Group by role
+            by_role = {}
+            for elem in interactive:
+                role = elem.get('role', 'unknown')
+                if role not in by_role:
+                    by_role[role] = 0
+                by_role[role] += 1
+            
+            print(f"\n📊 Interactive elements summary:")
+            for role, count in sorted(by_role.items()):
+                print(f"  {role}: {count}")
+            
+            # Try common element searches
+            print(f"\n🔍 Looking for common elements:")
+            
+            # Search boxes
+            search_boxes = examples.find_elements_by_role(url, "searchbox")
+            textboxes = examples.find_elements_by_role(url, "textbox")
+            print(f"  Search boxes: {len(search_boxes)}")
+            print(f"  Text inputs: {len(textboxes)}")
+            
+            # Buttons
+            buttons = examples.find_elements_by_role(url, "button")
+            print(f"  Buttons: {len(buttons)}")
+            
+            # Links
+            links = examples.find_elements_by_role(url, "link")
+            print(f"  Links: {len(links)}")
+            
+            if search_boxes or textboxes:
+                search_elements = search_boxes + textboxes
+                first_search = search_elements[0]
+                search_name = first_search.get('name', 'search')
+                print(f"\n🎯 Creating selector for search element: '{search_name}'")
+                selector = examples.create_selector_from_aria(url, search_name)
+                print(f"   Selector: {selector}")
+        except Exception as e:
+            print(f"❌ Error during ARIA analysis: {e}")
+            
     finally:
         examples.cleanup()
 
