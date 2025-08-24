@@ -101,21 +101,26 @@ class BrowserAgent:
         except Exception:
             return False
     
-    def execute(self, instruction: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
-        """执行用户指令
+    def execute(self, text: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
+        """执行用户自然语言文本
         
         Args:
-            instruction: 用户的自然语言指令
+            text: 用户输入的自然语言文本（例如："在bing网站检索北京秋天"）
             session_state: 会话状态，用于保存多轮对话的上下文
             
         Returns:
             Dict[str, Any]: 执行结果，包含success、message、error等字段
+            
+        注意：
+            - text参数是用户输入的自然语言文本
+            - 系统内部会将text转换为executable JSON instruction进行执行
+            - instruction特指系统内部使用的JSON格式可执行指令
         """
         if not self.initialized:
             self.initialize()
         
         try:
-            self.logger.info(f"执行指令: {instruction}")
+            self.logger.info(f"执行自然语言文本: {text}")
             
             # 第一次分析（容错）
             page_data = {}
@@ -126,10 +131,10 @@ class BrowserAgent:
                 self.logger.warning(f"页面分析失败，使用空page_data: {analyze_err}")
                 page_data = {}
             
-            # 第一次构建（可能为前置导航）
+            # 第一次构建（将自然语言文本转换为可执行的JSON指令，可能为前置导航）
             try:
                 json_instruction = self.instruction_builder.build(
-                    instruction,
+                    text,
                     page_data,
                     session_state
                 )
@@ -161,7 +166,7 @@ class BrowserAgent:
                 # 第二次构建（应避免再次navigate）
                 try:
                     json_instruction_2 = self.instruction_builder.build(
-                        instruction,
+                        text,
                         updated_page_data,
                         session_state
                     )

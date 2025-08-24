@@ -132,8 +132,8 @@ class TestARIASnapshotExamples:
         result = aria_examples.basic_aria_snapshot("https://google.com")
         
         # Assertions
-        aria_examples.page.goto.assert_called_once_with("https://google.com")
-        aria_examples.page.wait_for_load_state.assert_called_once_with("networkidle")
+        aria_examples.page.goto.assert_called_once_with("https://google.com", timeout=60000)
+        aria_examples.page.wait_for_load_state.assert_called_once_with("domcontentloaded")
         aria_examples.page.accessibility.snapshot.assert_called_once()
         
         assert result == sample_aria_snapshot

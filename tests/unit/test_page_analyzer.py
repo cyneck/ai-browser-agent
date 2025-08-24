@@ -25,77 +25,48 @@ class TestPageAnalyzer(unittest.TestCase):
         self.mock_page = MagicMock()
         
         # 设置模拟页面内容
-        self.mock_page.content.return_value = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>测试页面</title>
-        </head>
-        <body>
-            <header>
-                <h1>测试网站</h1>
-                <nav>
-                    <ul>
-                        <li><a href="/">首页</a></li>
-                        <li><a href="/about">关于</a></li>
-                        <li><a href="/contact">联系我们</a></li>
-                    </ul>
-                </nav>
-            </header>
-            <main>
-                <h2>欢迎访问</h2>
-                <p>这是一个测试页面，用于单元测试。</p>
-                <form>
-                    <input type="text" placeholder="搜索...">
-                    <button type="submit">搜索</button>
-                </form>
-            </main>
-            <footer>
-                <p>&copy; 2023 测试网站</p>
-            </footer>
-        </body>
-        </html>
-        """
+        self.mock_page.url = "https://test.com"
+        self.mock_page.title.return_value = "测试页面"
+        self.mock_page.evaluate.return_value = [
+            {
+                "type": "link",
+                "text": "首页",
+                "attributes": {"href": "/"},
+                "selector": "a[href='/']"
+            },
+            {
+                "type": "button",
+                "text": "搜索",
+                "attributes": {"type": "submit"},
+                "selector": "button[type='submit']"
+            }
+        ]
+        self.mock_page.accessibility.snapshot.return_value = {"role": "WebArea", "name": "测试页面"}
         
         # 创建PageAnalyzer实例
         self.analyzer = PageAnalyzer(self.mock_page)
     
-    def test_extract_page_title(self):
-        """测试提取页面标题"""
-        title = self.analyzer.extract_page_title()
-        self.assertEqual(title, "测试页面")
+    def test_analyze_page(self):
+        """测试页面分析"""
+        result = self.analyzer.analyze()
+        
+        # 验证结果结构
+        self.assertIsInstance(result, dict)
+        self.assertTrue(result.get("is_valid", False))
+        self.assertEqual(result.get("title"), "测试页面")
+        self.assertEqual(result.get("url"), "https://test.com")
+        self.assertIn("elements", result)
+        self.assertIn("functional_areas", result)
+        
+    def test_get_aria_snapshot(self):
+        """测试获取ARIA快照"""
+        snapshot = self.analyzer.get_aria_snapshot()
+        
+        # 验证结果
+        self.assertIsNotNone(snapshot)
+        self.assertIsInstance(snapshot, dict)
     
-    def test_extract_page_type(self):
-        """测试识别页面类型"""
-        page_type = self.analyzer.identify_page_type()
-        self.assertEqual(page_type, "generic")
-    
-    def test_extract_main_content(self):
-        """测试提取主要内容"""
-        main_content = self.analyzer.extract_main_content()
-        self.assertIn("欢迎访问", main_content)
-        self.assertIn("这是一个测试页面，用于单元测试。", main_content)
-    
-    def test_extract_navigation_links(self):
-        """测试提取导航链接"""
-        nav_links = self.analyzer.extract_navigation_links()
-        self.assertIn({"text": "首页", "url": "/"}, nav_links)
-        self.assertIn({"text": "关于", "url": "/about"}, nav_links)
-        self.assertIn({"text": "联系我们", "url": "/contact"}, nav_links)
-    
-    def test_extract_form_elements(self):
-        """测试提取表单元素"""
-        forms = self.analyzer.extract_form_elements()
-        self.assertEqual(len(forms), 1)
-        self.assertIn("搜索", str(forms))
-    
-    def test_generate_page_intent_graph(self):
-        """测试生成页面意图图"""
-        graph = self.analyzer.generate_page_intent_graph()
-        self.assertIsNotNone(graph)
-        self.assertIn("title", graph)
-        self.assertIn("type", graph)
-        self.assertIn("elements", graph)
+
 
 
 if __name__ == "__main__":

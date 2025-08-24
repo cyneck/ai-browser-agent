@@ -4,7 +4,11 @@
 """
 指令构建器
 
-负责将用户的自然语言指令转换为标准化的JSON格式指令，供执行层执行。
+负责将用户的自然语言文本转换为标准化的JSON格式指令，供执行层执行。
+
+术语说明：
+- text/user_text: 用户输入的自然语言文本（例如："在bing网站检索北京秋天"）
+- instruction/json_instruction: 系统内部使用的可执行JSON格式指令
 """
 
 import json
@@ -23,7 +27,7 @@ from src.common.logger import get_logger
 
 
 class InstructionBuilder:
-    """指令构建器类，负责构建标准化的JSON格式指令"""
+    """指令构建器类，负责将自然语言文本构建为标准化的JSON格式指令"""
 
     def __init__(self):
         """初始化指令构建器"""
@@ -31,24 +35,33 @@ class InstructionBuilder:
         self.api_key = get_config("GEMINI_API_KEY")
 
 
-    def build(self, user_instruction: str, page_data: Dict[str, Any],
+    def build(self, user_text: str, page_data: Dict[str, Any],
               session_state: Dict[str, Any]) -> Dict[str, Any]:
-        """构建标准化的JSON格式指令"""
+        """将用户自然语言文本构建为标准化的JSON格式指令
+        
+        Args:
+            user_text: 用户输入的自然语言文本（如："在bing网站检索北京秋天"）
+            page_data: 当前页面的结构化数据
+            session_state: 会话状态
+            
+        Returns:
+            Dict[str, Any]: 可执行的JSON格式指令
+        """
         try:
-            self.logger.info(f"构建指令: {user_instruction}")
+            self.logger.info(f"构建指令: {user_text}")
 
             # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
             if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
-                nav_only = self._maybe_build_navigation_first(user_instruction)
+                nav_only = self._maybe_build_navigation_first(user_text)
                 if nav_only:
                     return nav_only
                 # 如果没有明确URL，则使用 Bing 前置检索
-                bing_pre_search = self._build_bing_pre_search(user_instruction)
+                bing_pre_search = self._build_bing_pre_search(user_text)
                 if bing_pre_search:
                     return bing_pre_search
 
             # 在已加载页面上，尝试已知站点的启发式动作（如搜索框操作）
-            known = self._maybe_build_known_site_action(user_instruction, page_data)
+            known = self._maybe_build_known_site_action(user_text, page_data)
             if known:
                 return known
 
@@ -57,7 +70,7 @@ class InstructionBuilder:
 
             # 构建提示词
             prompt = self._build_prompt(
-                user_instruction,
+                user_text,
                 page_data,
                 conversation_history
             )
@@ -71,7 +84,7 @@ class InstructionBuilder:
             # 更新对话历史
             conversation_history.append({
                 "role": "user",
-                "content": user_instruction
+                "content": user_text
             })
             conversation_history.append({
                 "role": "assistant",
@@ -93,12 +106,12 @@ class InstructionBuilder:
             return {
                 "action": "error",
                 "error": str(e),
-                "original_instruction": user_instruction
+                "original_text": user_text
             }
 
-    def _build_prompt(self, user_instruction: str, page_data: Dict[str, Any],
+    def _build_prompt(self, user_text: str, page_data: Dict[str, Any],
                       conversation_history: List[Dict[str, str]]) -> str:
-        """构建提示词"""
+        """构建LLM提示词"""
         system_prompt = """
         你是一个专业的网页自动化助手，负责将用户的自然语言指令转换为标准化的JSON格式指令。
         
@@ -176,7 +189,7 @@ class InstructionBuilder:
         ARIA 概览（可选）：
         {json.dumps(page_data.get('aria_snapshot') or {}, ensure_ascii=False)[:800]}
         
-        用户指令: {user_instruction}
+        用户指令: {user_text}
         
         请根据用户指令和页面信息，生成标准化的JSON格式指令。
         """
@@ -190,17 +203,17 @@ class InstructionBuilder:
 
         return system_prompt + "\n\n" + user_prompt
 
-    def _detect_navigation_intent_and_url(self, user_instruction: str) -> Optional[str]:
+    def _detect_navigation_intent_and_url(self, user_text: str) -> Optional[str]:
         """识别导航意图并提取规范化 URL。
         规则：优先匹配显式 http/https；否则匹配裸域（ASCII 顶级域），忽略周边中文词缀（如“访问”“网站”）。
         """
         # 1) 显式 URL（http/https）
-        m = re.search(r"https?://[A-Za-z0-9.-]+(?:\.[A-Za-z]{2,24})(?:/[^\s]*)?", user_instruction)
+        m = re.search(r"https?://[A-Za-z0-9.-]+(?:\.[A-Za-z]{2,24})(?:/[^\s]*)?", user_text)
         if m:
             return m.group(0)
         # 2) 裸域（仅ASCII域名与TLD），避免把中文词缀合入
         m2 = re.search(r"(?<![A-Za-z0-9.-])([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24})(?![A-Za-z0-9.-])",
-                       user_instruction)
+                       user_text)
         if m2:
             return "https://" + m2.group(1)
         return None
@@ -222,9 +235,9 @@ class InstructionBuilder:
         matches = pattern.findall(text or "")
         return [match.strip() for match in matches]
 
-    def _maybe_build_navigation_first(self, user_instruction: str) -> Optional[Dict[str, Any]]:
+    def _maybe_build_navigation_first(self, user_text: str) -> Optional[Dict[str, Any]]:
         """在页面为空时，尝试仅生成导航步骤（URL 直达）。"""
-        url = self._detect_navigation_intent_and_url(user_instruction)
+        url = self._detect_navigation_intent_and_url(user_text)
         if not url:
             return None
         # Note: URL validation removed - no domain filtering
@@ -236,15 +249,15 @@ class InstructionBuilder:
             "description": f"前置导航到 {url} 并等待页面加载"
         }
 
-    def _build_bing_pre_search(self, user_instruction: str) -> Dict[str, Any]:
+    def _build_bing_pre_search(self, user_text: str) -> Dict[str, Any]:
         """当无法直达 URL 时，先在 Bing 搜索预检索站点/意图。"""
         from urllib.parse import quote_plus
-        query = quote_plus(user_instruction.strip())
+        query = quote_plus(user_text.strip())
         url = f"https://www.bing.com/search?q={query}"
         # Note: URL validation removed - no domain filtering
         return {
             "steps": [
-                {"action": "navigate", "value": url, "description": f"在Bing搜索：{user_instruction}"},
+                {"action": "navigate", "value": url, "description": f"在Bing搜索：{user_text}"},
                 {"action": "wait", "value": 2000, "description": "等待搜索结果加载(2秒)"}
             ],
             "description": "前置导航到Bing进行检索"
@@ -259,10 +272,10 @@ class InstructionBuilder:
             return m.group(1).strip().strip("'\"")
         return instruction.strip().strip("'\"")
 
-    def _maybe_build_known_site_action(self, user_instruction: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def _maybe_build_known_site_action(self, user_text: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """在已知站点（如百度/Bing/Google）上生成搜索动作的启发式步骤。"""
         try:
-            if not self._intent_is_search(user_instruction):
+            if not self._intent_is_search(user_text):
                 return None
             url = (page_data or {}).get("url") or ""
             host = ""
@@ -272,7 +285,7 @@ class InstructionBuilder:
                     host = m.group(1).lower()
             if not host:
                 return None
-            query = self._extract_query_from_instruction(user_instruction)
+            query = self._extract_query_from_instruction(user_text)
             steps: List[Dict[str, Any]] = []
             # 百度
             if "baidu.com" in host:

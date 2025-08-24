@@ -4,7 +4,10 @@
 """
 命令行交互界面
 
-提供基于命令行的用户交互界面，接收用户的自然语言指令并显示执行结果。
+提供基于命令行的用户交互界面，接收用户的自然语言文本并显示执行结果。
+注意术语区分：
+- text: 用户输入的自然语言文本
+- instruction: 系统内部使用的可执行JSON格式指令
 """
 
 import sys
@@ -41,8 +44,8 @@ class CLIInterface:
                 if user_input.lower() in ["退出", "exit", "quit"]:
                     break
                 
-                # 处理用户指令
-                self._process_instruction(user_input)
+                # 处理用户自然语言文本
+                self._process_text(user_input)
 
         except KeyboardInterrupt:
             print("\n程序被用户中断")
@@ -54,18 +57,18 @@ class CLIInterface:
             self.agent.cleanup()
             print("会话已结束，谢谢使用！")
 
-    def initialize_and_execute(self, instruction: str):
-        """初始化并直接执行单条指令"""
-        self.logger.info(f"直接执行指令: {instruction}")
+    def initialize_and_execute(self, text: str):
+        """初始化并直接执行单条自然语言文本"""
+        self.logger.info(f"直接执行自然语言文本: {text}")
         try:
             self.agent.initialize()
-            self._process_instruction(instruction)
+            self._process_text(text)
         except Exception as e:
-            self.logger.error(f"执行指令时发生错误: {str(e)}")
-            print(f"执行指令时发生错误: {str(e)}")
+            self.logger.error(f"执行自然语言文本时发生错误: {str(e)}")
+            print(f"执行自然语言文本时发生错误: {str(e)}")
         finally:
             self.agent.cleanup()
-            print("指令执行完毕。")
+            print("自然语言文本执行完毕。")
 
     def _get_user_input(self) -> str:
         """获取用户输入"""
@@ -74,13 +77,13 @@ class CLIInterface:
         except EOFError:
             return "exit"
 
-    def _process_instruction(self, instruction: str):
-        """处理用户指令"""
+    def _process_text(self, text: str):
+        """处理用户自然语言文本"""
         try:
             print("[执行中...]")
 
-            # 执行指令
-            result = self.agent.execute(instruction, self.session_state)
+            # 执行自然语言文本，这里会将文本转换为可执行的JSON指令
+            result = self.agent.execute(text, self.session_state)
 
             # 显示结果
             if result.get("success", False):
@@ -93,33 +96,6 @@ class CLIInterface:
                 self.session_state.update(result["session_state"])
 
         except Exception as e:
-            self.logger.error(f"处理指令时发生错误: {str(e)}")
-            print(f"处理指令时发生错误: {str(e)}")
+            self.logger.error(f"处理自然语言文本时发生错误: {str(e)}")
+            print(f"处理自然语言文本时发生错误: {str(e)}")
 
-        """获取用户输入"""
-        try:
-            return input("> ")
-        except EOFError:
-            return "exit"
-    
-    def _process_instruction(self, instruction: str):
-        """处理用户指令"""
-        try:
-            print("[执行中...]")
-            
-            # 执行指令
-            result = self.agent.execute(instruction, self.session_state)
-            
-            # 显示结果
-            if result.get("success", False):
-                print(result.get("message", "执行成功"))
-            else:
-                print(f"执行失败: {result.get('error', '未知错误')}")
-                
-            # 更新会话状态
-            if "session_state" in result:
-                self.session_state.update(result["session_state"])
-                
-        except Exception as e:
-            self.logger.error(f"处理指令时发生错误: {str(e)}")
-            print(f"处理指令时发生错误: {str(e)}")
