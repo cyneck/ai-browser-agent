@@ -11,9 +11,6 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Tuple
-from urllib.parse import urlparse
-
-from src.common.config import get_config
 
 
 class SafetyValidator:
@@ -63,9 +60,7 @@ class SafetyValidator:
             if "value" not in step:
                 raise ValueError("navigate 缺少 value(URL)")
 
-        # URL 域名白名单
-        if action == "navigate":
-            self._validate_url(step.get("value"))
+        # Note: URL validation removed - no domain filtering
 
         # 文本长度限制与转义
         sanitized = dict(step)
@@ -88,17 +83,6 @@ class SafetyValidator:
             s = s.replace("import", "").replace("__", "_")
         return s
 
-    def _validate_url(self, url: str) -> None:
-        allowed_domains = get_config("ALLOWED_DOMAINS", "*")
-        if allowed_domains == "*":
-            return
-        parsed = urlparse(url)
-        domain = parsed.netloc
-        if not domain:
-            raise ValueError("无效URL")
-        parts = domain.split(".")
-        main = ".".join(parts[-2:]) if len(parts) > 2 else domain
-        if main not in allowed_domains:
-            raise ValueError(f"域名不在白名单: {main}")
+
 
 

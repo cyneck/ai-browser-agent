@@ -242,49 +242,6 @@ class PermissionManager:
         return required_level == PermissionLevel.HIGH_RISK
 ```
 
-### 5.2 域名白名单
-
-限制系统可以访问的网站：
-
-1. **域名白名单**：只允许访问白名单中的域名
-2. **导航拦截**：拦截对非白名单域名的导航
-
-```python
-class DomainWhitelist:
-    def __init__(self, whitelist=None):
-        self.whitelist = whitelist or []
-    
-    def add_domain(self, domain):
-        """添加域名到白名单"""
-        if domain not in self.whitelist:
-            self.whitelist.append(domain)
-    
-    def remove_domain(self, domain):
-        """从白名单移除域名"""
-        if domain in self.whitelist:
-            self.whitelist.remove(domain)
-    
-    def is_allowed(self, url):
-        """检查URL是否允许访问"""
-        if not self.whitelist:  # 空白名单表示允许所有
-            return True
-        
-        parsed_url = urlparse(url)
-        domain = parsed_url.netloc
-        
-        return any(domain.endswith(allowed_domain) for allowed_domain in self.whitelist)
-    
-    async def setup_navigation_blocking(self, page):
-        """设置导航拦截"""
-        async def block_navigation(request):
-            if request.is_navigation_request() and not self.is_allowed(request.url):
-                print(f"Blocked navigation to: {request.url}")
-                return await request.abort()
-            return await request.continue_()
-        
-        await page.route("**/*", block_navigation)
-```
-
 ## 6. 错误处理与恢复
 
 ### 6.1 错误分类与处理

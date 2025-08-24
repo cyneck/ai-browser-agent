@@ -44,7 +44,6 @@ def load_config() -> Dict[str, Any]:
         "LOG_FILE": str(root_dir / "logs" / "agent.log"),
         "WEB_HOST": "127.0.0.1",
         "WEB_PORT": "8000",
-        "ALLOWED_DOMAINS": "*",  # 默认允许所有域名
         "MAX_EXECUTION_TIME": "60",
     }
     
@@ -65,9 +64,7 @@ def load_config() -> Dict[str, Any]:
     for key in ["WEB_PORT", "MAX_EXECUTION_TIME"]:
         config[key] = int(config[key])
     
-    # 转换列表值
-    if config["ALLOWED_DOMAINS"] != "*":
-        config["ALLOWED_DOMAINS"] = [domain.strip() for domain in config["ALLOWED_DOMAINS"].split(",")]
+
     
     return config
 

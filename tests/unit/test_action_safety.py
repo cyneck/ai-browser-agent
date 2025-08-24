@@ -27,10 +27,7 @@ class TestSafetyValidator(unittest.TestCase):
         self.assertNotIn("__proto__", out["selector"])  # 双下划线被降级
         self.assertNotIn("import", out["value"])  # import 被去除
 
-    def test_url_whitelist_all(self):
-        instr = {"action": "navigate", "value": "https://example.com"}
-        out = self.validator.validate_and_sanitize(instr)
-        self.assertEqual(out["value"], "https://example.com")
+
 
 
 if __name__ == "__main__":

@@ -36,7 +36,21 @@ class ActionExecutor:
         self.logger = get_logger()
         self.page = page
         self.template_env = self._setup_template_env()
-        self.execution_namespace = {"__builtins__": {"Exception": Exception}}
+        self.execution_namespace = {
+            "__builtins__": {
+                "Exception": Exception,
+                "str": str,
+                "int": int,
+                "float": float,
+                "bool": bool,
+                "list": list,
+                "dict": dict,
+                "len": len,
+                "range": range,
+                "enumerate": enumerate,
+                "zip": zip
+            }
+        }
         self._setup_execution_namespace()
         self.state_manager = state_manager or StateManager()
         self.error_handler = error_handler or ErrorHandler()

@@ -1,0 +1,22 @@
+# 按键操作
+try:
+    {% if instruction.selector %}
+    element = page.locator("{{ instruction.selector }}")
+    element.press("{{ instruction.key }}")
+    result = {
+        "success": True,
+        "message": "成功在 {{ instruction.selector }} 上按下 {{ instruction.key }} 键"
+    }
+    {% else %}
+    page.keyboard.press("{{ instruction.key }}")
+    result = {
+        "success": True,
+        "message": "成功按下 {{ instruction.key }} 键"
+    }
+    {% endif %}
+except Exception as e:
+    result = {
+        "success": False,
+        "message": "按键操作失败",
+        "error": str(e)
+    }

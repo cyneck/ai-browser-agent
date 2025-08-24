@@ -234,6 +234,26 @@ test_output/
 test_screenshots/
 test_downloads/
 
+# Prevent test clutter in root directory
+# --------------------------------------
+# Test files should be in tests/ directory only
+test_*.py
+!tests/
+# Demo files should be in examples/ directory
+demo_*.py
+!examples/
+# Test report files
+*_test_report.*
+*_TEST_SUMMARY.*
+test_report.*
+test_summary.*
+# CLI test scripts
+*_cli.bat
+*_cli.sh
+# Verification and final report scripts
+final_verification_*.py
+verification_report_*.py
+
 # Performance profiling
 *.prof
 profile_results/
