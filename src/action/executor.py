@@ -58,7 +58,7 @@ class ActionExecutor:
     
     def execute(self, instruction: Dict[str, Any], session_state: Dict[str, Any],
                 timeout: int = 60) -> Dict[str, Any]:
-        """执行指令
+        """执行指令（统一的多步执行方式）
         
         Args:
             instruction: 标准化的JSON格式指令
@@ -70,7 +70,10 @@ class ActionExecutor:
         """
         try:
             # 记录指令
-            self.logger.info(f"执行指令: {json.dumps(instruction, ensure_ascii=False)}")
+            self.logger.info(f"执行指令:")
+            self.logger.info(f"{'='*60}")
+            self.logger.info(json.dumps(instruction, ensure_ascii=False, indent=2))
+            self.logger.info(f"{'='*60}")
             
             # 更新执行命名空间
             self.execution_namespace.update({
@@ -82,12 +85,12 @@ class ActionExecutor:
             # 先进行安全校验与转义
             instruction = self.safety_validator.validate_and_sanitize(instruction)
 
-            # 如果是多步操作，逐步执行
-            if "steps" in instruction:
-                return self._execute_multi_steps(instruction, timeout)
-            else:
-                # 单步操作
-                return self._execute_single_action(instruction, timeout)
+            # 标准化为多步格式：如果不是多步指令，转换为单步的多步指令
+            if "steps" not in instruction:
+                instruction = self._normalize_to_multi_step(instruction)
+            
+            # 统一使用多步执行
+            return self._execute_steps(instruction, timeout)
         except Exception as e:
             return self.error_handler.handle_error(e, instruction, {
                 "session_state": session_state
@@ -464,12 +467,34 @@ result = {
             "to_base64": to_base64
         })
     
-    def _execute_multi_steps(self, instruction: Dict[str, Any], timeout: int) -> Dict[str, Any]:
-        """执行多步操作"""
-        steps = instruction.get("steps", [])
-        description = instruction.get("description", "执行多步操作")
+    def _normalize_to_multi_step(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
+        """将单步指令标准化为多步格式
         
-        self.logger.info(f"开始执行多步操作: {description}")
+        Args:
+            instruction: 单步指令
+            
+        Returns:
+            Dict[str, Any]: 多步格式的指令
+        """
+        return {
+            "steps": [instruction],
+            "description": instruction.get("description", f"执行{instruction.get('action', '未知')}操作")
+        }
+    
+    def _execute_steps(self, instruction: Dict[str, Any], timeout: int) -> Dict[str, Any]:
+        """统一的步骤执行方法
+        
+        Args:
+            instruction: 包含steps的多步指令
+            timeout: 执行超时时间（秒）
+            
+        Returns:
+            Dict[str, Any]: 执行结果
+        """
+        steps = instruction.get("steps", [])
+        description = instruction.get("description", "执行操作")
+        
+        self.logger.info(f"开始执行操作: {description}")
         
         # 记录每一步的结果
         step_results = []
@@ -487,8 +512,8 @@ result = {
                 error_message = f"执行超时（{timeout}秒）"
                 break
             
-            # 执行单步操作
-            step_result = self._execute_single_action(step)
+            # 执行单个步骤
+            step_result = self._execute_step(step)
             step_results.append(step_result)
             
             # 如果某一步失败，整体操作失败
@@ -504,17 +529,32 @@ result = {
             "step_results": step_results
         }
         
+        # 对于单步操作（只有一个step），简化返回结果
+        if len(steps) == 1 and step_results:
+            # 保留step_results以便调试，但使用单步的消息
+            single_result = step_results[0]
+            result["message"] = single_result.get("message", result["message"])
+        
         if not overall_success and error_message:
             result["error"] = error_message
         
         return result
     
-    def _execute_single_action(self, instruction: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
-        """执行单步操作"""
-        action = instruction.get("action")
-        description = instruction.get("description", f"执行{action}操作")
+    def _execute_step(self, step: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
+        """执行单个步骤
         
-        self.logger.info(f"执行操作: {action} - {description}")
+        Args:
+            step: 单个步骤指令
+            timeout: 步骤超时时间（秒）
+            
+        Returns:
+            Dict[str, Any]: 步骤执行结果
+        """
+        action = step.get("action")
+        description = step.get("description", f"执行{action}操作")
+        
+        self.logger.info(f"执行步骤: {action} - {description}")
+        self.logger.info(f"步骤详情: {json.dumps(step, ensure_ascii=False, indent=2)}")
         
         # 模板别名映射（兼容历史 action）
         action_template_name = action
@@ -534,7 +574,12 @@ result = {
         
         # 渲染模板
         try:
-            code = template.render(instruction=instruction)
+            code = template.render(instruction=step)
+            # 添加调试输出：打印生成的代码
+            self.logger.info(f"生成的执行代码:")
+            self.logger.info(f"{'='*50}")
+            self.logger.info(code)
+            self.logger.info(f"{'='*50}")
         except Exception as e:
             self.logger.error(f"渲染模板失败: {str(e)}")
             return {
@@ -557,4 +602,4 @@ result = {
                 self.state_manager.set_state("last_message", result.get("message"))
             return result
         except Exception as e:
-            return self.error_handler.handle_error(e, instruction, {})
+            return self.error_handler.handle_error(e, step, {})

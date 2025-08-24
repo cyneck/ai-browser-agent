@@ -80,7 +80,7 @@ class BrowserAgent:
             raise
 
     def _is_navigation_only(self, instruction: Dict[str, Any]) -> bool:
-        """判断指令是否仅包含导航/等待步骤"""
+        """判断指令是否仅包含导航/等待步骤（保留用于向后兼容）"""
         try:
             if not instruction:
                 return False
@@ -115,6 +115,7 @@ class BrowserAgent:
             - text参数是用户输入的自然语言文本
             - 系统内部会将text转换为executable JSON instruction进行执行
             - instruction特指系统内部使用的JSON格式可执行指令
+            - 优化版本：使用单次LLM调用生成完整多步指令
         """
         if not self.initialized:
             self.initialize()
@@ -122,7 +123,7 @@ class BrowserAgent:
         try:
             self.logger.info(f"执行自然语言文本: {text}")
             
-            # 第一次分析（容错）
+            # 智能页面分析（容错）
             page_data = {}
             try:
                 analyzed = self.page_analyzer.analyze()
@@ -131,9 +132,9 @@ class BrowserAgent:
                 self.logger.warning(f"页面分析失败，使用空page_data: {analyze_err}")
                 page_data = {}
             
-            # 第一次构建（将自然语言文本转换为可执行的JSON指令，可能为前置导航）
+            # 单次智能指令构建（优化：生成完整多步指令避免二次LLM调用）
             try:
-                json_instruction = self.instruction_builder.build(
+                json_instruction = self.instruction_builder.build_optimized(
                     text,
                     page_data,
                     session_state
@@ -142,72 +143,22 @@ class BrowserAgent:
                 self.logger.error(f"构建指令失败: {build_err}")
                 json_instruction = {"action": "error", "error": str(build_err)}
             
-            messages: List[str] = []
-            screenshots: List[str] = []
-
-            # 执行第一阶段
+            # 执行完整指令（可能包含多个步骤）
             result = self.action_executor.execute(
                 json_instruction,
                 session_state,
-                timeout=get_config("MAX_EXECUTION_TIME", 60)
+                timeout=get_config("MAX_EXECUTION_TIME", 120)  # 增加超时时间以支持多步操作
             )
-            messages.append(result.get("message", ""))
-            if result.get("screenshot"):
-                screenshots.append(result["screenshot"])
-
-            # 如果第一阶段仅为导航/等待且成功，则进行第二阶段：重新感知并生成精细操作
-            if result.get("success") and self._is_navigation_only(json_instruction):
-                try:
-                    updated = self.page_analyzer.analyze()
-                    updated_page_data = updated if (isinstance(updated, dict) and updated.get("is_valid", True)) else {}
-                except Exception:
-                    updated_page_data = {}
-
-                # 第二次构建（应避免再次navigate）
-                try:
-                    json_instruction_2 = self.instruction_builder.build(
-                        text,
-                        updated_page_data,
-                        session_state
-                    )
-                except Exception as build_err_2:
-                    self.logger.error(f"二阶段构建指令失败: {build_err_2}")
-                    json_instruction_2 = {"action": "error", "error": str(build_err_2)}
-
-                # 若二阶段仍是纯导航，跳过避免循环
-                if not self._is_navigation_only(json_instruction_2):
-                    result2 = self.action_executor.execute(
-                        json_instruction_2,
-                        session_state,
-                        timeout=get_config("MAX_EXECUTION_TIME", 60)
-                    )
-                    messages.append(result2.get("message", ""))
-                    if result2.get("screenshot"):
-                        screenshots.append(result2["screenshot"])
-                    # 合并结果
-                    result = {
-                        **result2,
-                        "success": result.get("success", False) and result2.get("success", False),
-                        "message": "; ".join(m for m in messages if m),
-                    }
-                else:
-                    # 若仍为导航，直接返回第一阶段结果
-                    result = {
-                        **result,
-                        "message": "; ".join(m for m in messages if m)
-                    }
             
             # 截图（可选）
-            screenshot = None
-            try:
-                if result.get("success", False) and result.get("take_screenshot", False):
-                    screenshot_bytes = self.page.screenshot()
-                    screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
-            except Exception:
-                screenshot = None
-            # 若前面已有截图，优先返回最后一次
-            if not screenshot and screenshots:
-                screenshot = screenshots[-1]
+            screenshot = result.get("screenshot")
+            if not screenshot:
+                try:
+                    if result.get("success", False) and result.get("take_screenshot", False):
+                        screenshot_bytes = self.page.screenshot()
+                        screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
+                except Exception:
+                    screenshot = None
             
             # 执行后重新感知（容错）
             try:
@@ -216,6 +167,7 @@ class BrowserAgent:
             except Exception:
                 updated_page_data = {}
 
+            self.logger.info(f"执行完成，成功: {result.get('success', False)}")
             return {
                 "success": result.get("success", False),
                 "message": result.get("message", "执行完成"),
