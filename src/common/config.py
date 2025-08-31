@@ -45,6 +45,20 @@ def load_config() -> Dict[str, Any]:
         "WEB_HOST": "127.0.0.1",
         "WEB_PORT": "8000",
         "MAX_EXECUTION_TIME": "60",
+        
+        # 人类行为模拟配置
+        "HUMAN_BEHAVIOR_ENABLED": "true",
+        "HUMAN_BEHAVIOR_MODE": "moderate",  # conservative, moderate, aggressive
+        "HUMAN_BASE_DELAY_MIN": "0.3",
+        "HUMAN_BASE_DELAY_MAX": "1.2",
+        "HUMAN_ACTION_INTERVAL_MIN": "0.5",
+        "HUMAN_ACTION_INTERVAL_MAX": "3.0",
+        "HUMAN_TYPING_SPEED_MIN": "3",
+        "HUMAN_TYPING_SPEED_MAX": "8",
+        "HUMAN_MOUSE_MOVE_ENABLED": "true",
+        "HUMAN_RANDOM_PAUSE_PROBABILITY": "0.15",
+        "HUMAN_RANDOM_PAUSE_MIN": "2.0",
+        "HUMAN_RANDOM_PAUSE_MAX": "8.0",
     }
     
     # 从环境变量中读取配置
@@ -55,14 +69,29 @@ def load_config() -> Dict[str, Any]:
         config[key] = value
     
     # 转换布尔值
-    if str(config["HEADLESS"]).lower() in ("true", "1", "yes"):
-        config["HEADLESS"] = True
-    else:
-        config["HEADLESS"] = False
+    bool_configs = ["HEADLESS", "HUMAN_BEHAVIOR_ENABLED", "HUMAN_MOUSE_MOVE_ENABLED"]
+    for key in bool_configs:
+        if key in config:
+            if str(config[key]).lower() in ("true", "1", "yes"):
+                config[key] = True
+            else:
+                config[key] = False
     
     # 转换整数值
     for key in ["WEB_PORT", "MAX_EXECUTION_TIME"]:
         config[key] = int(config[key])
+        
+    # 转换浮点数值
+    float_configs = [
+        "HUMAN_BASE_DELAY_MIN", "HUMAN_BASE_DELAY_MAX",
+        "HUMAN_ACTION_INTERVAL_MIN", "HUMAN_ACTION_INTERVAL_MAX",
+        "HUMAN_TYPING_SPEED_MIN", "HUMAN_TYPING_SPEED_MAX",
+        "HUMAN_RANDOM_PAUSE_PROBABILITY", "HUMAN_RANDOM_PAUSE_MIN", 
+        "HUMAN_RANDOM_PAUSE_MAX"
+    ]
+    for key in float_configs:
+        if key in config:
+            config[key] = float(config[key])
     
 
     
@@ -82,3 +111,30 @@ def get_config(key: str, default: Any = None) -> Any:
     """
     config = load_config()
     return config.get(key, default)
+
+
+def get_human_behavior_config() -> Dict[str, Any]:
+    """
+    获取人类行为模拟配置
+    
+    Returns:
+        Dict[str, Any]: 人类行为模拟配置字典
+    """
+    config = load_config()
+    
+    behavior_config = {
+        "enabled": config.get("HUMAN_BEHAVIOR_ENABLED", True),
+        "behavior_mode": config.get("HUMAN_BEHAVIOR_MODE", "moderate"),
+        "base_delay_min": config.get("HUMAN_BASE_DELAY_MIN", 0.3),
+        "base_delay_max": config.get("HUMAN_BASE_DELAY_MAX", 1.2),
+        "action_interval_min": config.get("HUMAN_ACTION_INTERVAL_MIN", 0.5),
+        "action_interval_max": config.get("HUMAN_ACTION_INTERVAL_MAX", 3.0),
+        "typing_speed_min": config.get("HUMAN_TYPING_SPEED_MIN", 3),
+        "typing_speed_max": config.get("HUMAN_TYPING_SPEED_MAX", 8),
+        "mouse_move_enabled": config.get("HUMAN_MOUSE_MOVE_ENABLED", True),
+        "random_pause_probability": config.get("HUMAN_RANDOM_PAUSE_PROBABILITY", 0.15),
+        "random_pause_min": config.get("HUMAN_RANDOM_PAUSE_MIN", 2.0),
+        "random_pause_max": config.get("HUMAN_RANDOM_PAUSE_MAX", 8.0),
+    }
+    
+    return behavior_config

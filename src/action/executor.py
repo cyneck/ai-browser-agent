@@ -19,25 +19,29 @@ from src.common.performance_monitor import get_performance_monitor
 from src.action.state_manager import StateManager
 from src.action.error_handler import ErrorHandler
 from src.action.safety_validator import SafetyValidator
+from src.action.human_behavior_simulator import HumanBehaviorSimulator
 
 
 class ActionExecutor:
     """动作执行器类，负责安全地执行指令"""
 
     def __init__(self, page: Page, state_manager: Optional[StateManager] = None,
-                 error_handler: Optional[ErrorHandler] = None):
+                 error_handler: Optional[ErrorHandler] = None,
+                 behavior_config: Optional[Dict[str, Any]] = None):
         """初始化动作执行器
 
         Args:
             page: Playwright页面对象
             state_manager: 状态管理器
             error_handler: 错误处理器
+            behavior_config: 人类行为模拟配置
         """
         self.logger = get_logger()
         self.page = page
         self.state_manager = state_manager or StateManager()
         self.error_handler = error_handler or ErrorHandler()
         self.perf_monitor = get_performance_monitor()
+        self.behavior_simulator = HumanBehaviorSimulator(behavior_config)
 
         # 将 action 名称映射到对应的处理方法
         self.action_handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
@@ -171,6 +175,9 @@ class ActionExecutor:
                 "error": f"未找到操作 '{action}' 的处理器。"
             }
 
+        # 人类行为模拟：操作前等待
+        self.behavior_simulator.wait_before_action(action)
+
         start_time = time.time()
         page_load_start = time.time()
         
@@ -207,6 +214,13 @@ class ActionExecutor:
             if result.get("success"):
                 self.state_manager.set_state("last_action", action)
                 self.state_manager.set_state("last_message", result.get("message"))
+                
+            # 记录操作历史到行为模拟器
+            self.behavior_simulator.record_action(
+                action, 
+                result.get("success", False), 
+                execution_time
+            )
             return result
             
         except PlaywrightError as e:
@@ -218,6 +232,12 @@ class ActionExecutor:
                 page_load_time=0,
                 success=False,
                 error_message=str(e)
+            )
+            # 记录失败的操作
+            self.behavior_simulator.record_action(
+                action, 
+                False, 
+                execution_time
             )
             return self.error_handler.handle_error(e, step, {})
             
@@ -231,6 +251,12 @@ class ActionExecutor:
                 success=False,
                 error_message=str(e)
             )
+            # 记录失败的操作
+            self.behavior_simulator.record_action(
+                action, 
+                False, 
+                execution_time
+            )
             return self.error_handler.handle_error(e, step, {})
 
     # --- Action Handler Methods ---
@@ -240,13 +266,49 @@ class ActionExecutor:
         if not url:
             return {"success": False, "message": "导航失败：URL为空"}
         self.page.goto(url, wait_until="domcontentloaded")
+        
+        # 页面加载后等待
+        wait_time = self.behavior_simulator.get_page_load_wait_time()
+        if wait_time > 0:
+            self.logger.debug(f"页面加载后等待: {wait_time:.2f}秒")
+            time.sleep(wait_time)
+            
         return {"success": True, "message": f"成功导航到 {url}"}
 
     def _execute_click(self, step: Dict[str, Any]) -> Dict[str, Any]:
         selector = step.get("selector")
         if not selector:
             return {"success": False, "message": "点击失败：选择器为空"}
-        self.page.locator(selector).click()
+            
+        # 模拟鼠标移动（如果启用）
+        try:
+            element = self.page.locator(selector)
+            if self.behavior_simulator.is_enabled():
+                # 获取元素位置
+                bbox = element.bounding_box()
+                if bbox:
+                    # 从当前鼠标位置移动到目标元素
+                    target_x = bbox["x"] + bbox["width"] // 2
+                    target_y = bbox["y"] + bbox["height"] // 2
+                    
+                    # 获取当前鼠标位置（如果可能）
+                    try:
+                        # 使用页面中心作为起始位置
+                        viewport = self.page.viewport_size()
+                        start_x = viewport["width"] // 2
+                        start_y = viewport["height"] // 2
+                        
+                        self.behavior_simulator.simulate_mouse_movement(
+                            self.page, (start_x, start_y), (target_x, target_y)
+                        )
+                    except Exception as e:
+                        self.logger.debug(f"鼠标移动模拟失败: {e}")
+                        
+            element.click()
+        except Exception:
+            # 如果元素位置获取失败，直接点击
+            self.page.locator(selector).click()
+            
         return {"success": True, "message": f"成功点击元素 {selector}"}
 
     def _execute_fill(self, step: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,7 +316,13 @@ class ActionExecutor:
         value = step.get("value", "")
         if not selector:
             return {"success": False, "message": "输入失败：选择器为空"}
-        self.page.locator(selector).fill(value)
+            
+        # 使用人类打字模拟
+        if self.behavior_simulator.is_enabled() and value:
+            self.behavior_simulator.simulate_human_typing(self.page, selector, value)
+        else:
+            self.page.locator(selector).fill(value)
+            
         return {"success": True, "message": f"成功在 {selector} 中输入文本"}
 
     def _execute_select(self, step: Dict[str, Any]) -> Dict[str, Any]:
@@ -298,12 +366,24 @@ class ActionExecutor:
     def _execute_scroll(self, step: Dict[str, Any]) -> Dict[str, Any]:
         if "selector" in step:
             self.page.locator(step["selector"]).scroll_into_view_if_needed()
+            # 滚动后等待
+            scroll_delay = self.behavior_simulator.get_base_delay() * 0.5
+            if scroll_delay > 0:
+                time.sleep(scroll_delay)
             return {"success": True, "message": f"成功滚动到元素 {step['selector']}"}
         elif "value" in step:
             self.page.evaluate(f"window.scrollBy(0, {step['value']})")
+            # 滚动后等待
+            scroll_delay = self.behavior_simulator.get_base_delay() * 0.3
+            if scroll_delay > 0:
+                time.sleep(scroll_delay)
             return {"success": True, "message": f"成功滚动页面 {step['value']} 像素"}
         else:
             self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            # 滚动后等待
+            scroll_delay = self.behavior_simulator.get_base_delay() * 0.5
+            if scroll_delay > 0:
+                time.sleep(scroll_delay)
             return {"success": True, "message": "成功滚动到页面底部"}
 
     def _execute_back(self, step: Dict[str, Any]) -> Dict[str, Any]:
@@ -325,3 +405,18 @@ class ActionExecutor:
     def _execute_error(self, step: Dict[str, Any]) -> Dict[str, Any]:
         error_message = step.get("error", "未知错误")
         return {"success": False, "message": "执行错误指令", "error": error_message}
+        
+    def get_behavior_stats(self) -> Dict[str, Any]:
+        """获取人类行为模拟统计信息"""
+        return self.behavior_simulator.get_stats()
+        
+    def configure_behavior(self, config: Dict[str, Any]) -> None:
+        """配置人类行为模拟参数"""
+        # 更新用户配置
+        self.behavior_simulator.config.update(config)
+        # 重新合并配置并应用模式
+        self.behavior_simulator.effective_config = {
+            **self.behavior_simulator.default_config, 
+            **self.behavior_simulator.config
+        }
+        self.behavior_simulator._apply_behavior_mode()

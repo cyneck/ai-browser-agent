@@ -11,7 +11,9 @@ class TestActionExecutor(unittest.TestCase):
         # Configure the mock locator to be chainable
         self.mock_locator = MagicMock()
         self.mock_page.locator.return_value = self.mock_locator
-        self.executor = ActionExecutor(self.mock_page)
+        # Disable human behavior for existing tests to maintain compatibility
+        behavior_config = {"enabled": False}
+        self.executor = ActionExecutor(self.mock_page, behavior_config=behavior_config)
 
     def test_get_supported_actions(self):
         """Test that all core actions are supported."""

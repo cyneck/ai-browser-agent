@@ -17,7 +17,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
-from src.common.config import get_config
+from src.common.config import get_config, get_human_behavior_config
 from src.common.logger import get_logger
 from src.perception.page_analyzer import PageAnalyzer
 from src.reasoning.instruction_builder import InstructionBuilder
@@ -98,7 +98,15 @@ class BrowserAgent:
             self.instruction_builder = InstructionBuilder()
             self.state_manager = StateManager()
             self.error_handler = ErrorHandler()
-            self.action_executor = ActionExecutor(self.page, self.state_manager, self.error_handler)
+            
+            # 获取人类行为模拟配置
+            behavior_config = get_human_behavior_config()
+            self.action_executor = ActionExecutor(
+                self.page, 
+                self.state_manager, 
+                self.error_handler,
+                behavior_config
+            )
             
             # 通知主线程初始化成功
             self._result_queue.put({"success": True})
