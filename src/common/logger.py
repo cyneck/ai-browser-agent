@@ -9,8 +9,10 @@
 
 import logging
 import os
+import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+from datetime import datetime
 
 
 def setup_logger(level: int = logging.INFO, log_file: Optional[str] = None) -> logging.Logger:
@@ -62,6 +64,44 @@ def setup_logger(level: int = logging.INFO, log_file: Optional[str] = None) -> l
         logger.addHandler(file_handler)
     
     return logger
+
+
+class StructuredLogger:
+    """结构化日志记录器，支持JSON格式输出"""
+    
+    def __init__(self, name: str, logger: logging.Logger):
+        self.name = name
+        self.logger = logger
+    
+    def log_performance(self, level: int, event_type: str, 
+                       data: Dict[str, Any], **kwargs):
+        """记录结构化性能日志"""
+        log_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "event_type": event_type,
+            "logger_name": self.name,
+            "data": data,
+            **kwargs
+        }
+        
+        self.logger.log(level, json.dumps(log_entry, ensure_ascii=False))
+    
+    def info_performance(self, event_type: str, data: Dict[str, Any], **kwargs):
+        """记录性能信息日志"""
+        self.log_performance(logging.INFO, event_type, data, **kwargs)
+    
+    def warning_performance(self, event_type: str, data: Dict[str, Any], **kwargs):
+        """记录性能警告日志"""
+        self.log_performance(logging.WARNING, event_type, data, **kwargs)
+    
+    def error_performance(self, event_type: str, data: Dict[str, Any], **kwargs):
+        """记录性能错误日志"""
+        self.log_performance(logging.ERROR, event_type, data, **kwargs)
+
+
+def get_structured_logger(name: str = "ai_browser_agent") -> StructuredLogger:
+    """获取结构化日志记录器"""
+    return StructuredLogger(name, get_logger())
 
 
 # 创建默认日志记录器

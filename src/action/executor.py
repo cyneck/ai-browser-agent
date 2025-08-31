@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional, Callable
 from playwright.sync_api import Page, Error as PlaywrightError
 
 from src.common.logger import get_logger
+from src.common.performance_monitor import get_performance_monitor
 from src.action.state_manager import StateManager
 from src.action.error_handler import ErrorHandler
 from src.action.safety_validator import SafetyValidator
@@ -36,6 +37,7 @@ class ActionExecutor:
         self.page = page
         self.state_manager = state_manager or StateManager()
         self.error_handler = error_handler or ErrorHandler()
+        self.perf_monitor = get_performance_monitor()
 
         # 将 action 名称映射到对应的处理方法
         self.action_handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
@@ -169,15 +171,66 @@ class ActionExecutor:
                 "error": f"未找到操作 '{action}' 的处理器。"
             }
 
+        start_time = time.time()
+        page_load_start = time.time()
+        
         try:
+            # 记录页面加载时间（如果适用）
+            if action == "navigate":
+                page_load_start = time.time()
+            
             result = handler(step)
+            execution_time = time.time() - start_time
+            page_load_time = time.time() - page_load_start if action == "navigate" else 0
+            
+            # 记录浏览器操作性能
+            screenshot_size = None
+            if action == "screenshot" and result.get("data"):
+                import base64
+                try:
+                    screenshot_data = result["data"]
+                    if isinstance(screenshot_data, str):
+                        screenshot_size = len(screenshot_data.encode('utf-8'))
+                except:
+                    pass
+            
+            self.perf_monitor.record_browser_action(
+                action_type=action,
+                selector=step.get("selector"),
+                execution_time=execution_time,
+                page_load_time=page_load_time,
+                success=result.get("success", True),
+                error_message=result.get("error"),
+                screenshot_size=screenshot_size
+            )
+            
             if result.get("success"):
                 self.state_manager.set_state("last_action", action)
                 self.state_manager.set_state("last_message", result.get("message"))
             return result
+            
         except PlaywrightError as e:
+            execution_time = time.time() - start_time
+            self.perf_monitor.record_browser_action(
+                action_type=action,
+                selector=step.get("selector"),
+                execution_time=execution_time,
+                page_load_time=0,
+                success=False,
+                error_message=str(e)
+            )
             return self.error_handler.handle_error(e, step, {})
+            
         except Exception as e:
+            execution_time = time.time() - start_time
+            self.perf_monitor.record_browser_action(
+                action_type=action,
+                selector=step.get("selector"),
+                execution_time=execution_time,
+                page_load_time=0,
+                success=False,
+                error_message=str(e)
+            )
             return self.error_handler.handle_error(e, step, {})
 
     # --- Action Handler Methods ---

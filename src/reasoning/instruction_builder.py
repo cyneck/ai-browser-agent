@@ -24,6 +24,7 @@ except Exception:
 
 from src.common.config import get_config
 from src.common.logger import get_logger
+from src.common.performance_monitor import get_performance_monitor
 from src.prompts.prompt_manager import PromptManager
 from src.plugins.plugin_manager import PluginManager
 
@@ -413,6 +414,8 @@ class InstructionBuilder:
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
         """调用LLM生成指令，带有智能降级策略"""
+        import time
+        
         if not self.api_key:
             self.logger.warning("GEMINI_API_KEY 未配置，使用内置启发式")
             return self._fallback_instruction_generation(prompt)
@@ -425,14 +428,42 @@ class InstructionBuilder:
             genai.configure(api_key=self.api_key)
             model_name = get_config("GEMINI_MODEL", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
+            
+            # 获取性能监控器
+            perf_monitor = get_performance_monitor()
+            start_time = time.time()
+            prompt_tokens = int(len(prompt.split()) * 1.3)  # 粗略估算token数
+            
             resp = model.generate_content(prompt)
             text = getattr(resp, "text", "") or ""
+            
+            response_time = time.time() - start_time
+            
             try:
                 blocks = self._extract_code_blocks(text, "json")
                 if blocks:
                     text = blocks[0]
-                return json.loads(text)
-            except Exception:
+                json_instruction = json.loads(text)
+                
+                completion_tokens = int(len(text.split()) * 1.3)
+                perf_monitor.record_llm_call(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    response_time=response_time,
+                    model_name=model_name,
+                    success=True
+                )
+                
+                return json_instruction
+            except Exception as e:
+                perf_monitor.record_llm_call(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    response_time=time.time() - start_time,
+                    model_name=model_name,
+                    success=False,
+                    error_message=str(e)
+                )
                 self.logger.warning("LLM返回无效JSON，使用启发式降级")
                 return self._fallback_instruction_generation(prompt)
         except Exception as e:
