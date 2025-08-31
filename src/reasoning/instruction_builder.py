@@ -25,6 +25,7 @@ except Exception:
 from src.common.config import get_config
 from src.common.logger import get_logger
 from src.prompts.prompt_manager import PromptManager
+from src.plugins.plugin_manager import PluginManager
 
 
 class InstructionBuilder:
@@ -35,6 +36,7 @@ class InstructionBuilder:
         self.logger = get_logger()
         self.api_key = get_config("GEMINI_API_KEY")
         self.prompt_manager = PromptManager()
+        self.plugin_manager = PluginManager()
 
 
     def build(self, user_text: str, page_data: Dict[str, Any],
@@ -185,20 +187,57 @@ class InstructionBuilder:
 
     def _try_simple_heuristics(self, user_text: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """尝试简单的启发式规则，避免不必要的LLM调用"""
-        # 检查是否为单纯导航意图
         nav_url = self._detect_navigation_intent_and_url(user_text)
+
+        # 如果指令中包含导航URL，并且当前页面无效，则优先处理导航
         if nav_url and (not page_data or not page_data.get("is_valid", True)):
+            host = ""
+            m = re.search(r"://([^/]+)/?", nav_url)
+            if m:
+                host = m.group(1).lower()
+
+            # 检查是否为已知可搜索站点
+            is_known_search_site = any(site in host for site in ["bing.com", "google."])
+
+            # 如果同时包含搜索意图和已知可搜索站点，则构建组合指令
+            if self._intent_is_search(user_text) and is_known_search_site:
+                # 模拟在目标页面上构建搜索动作
+                search_action = self._maybe_build_known_site_action(user_text, {"url": nav_url})
+                if search_action and "steps" in search_action:
+                    # 合并导航和搜索步骤
+                    return {
+                        "steps": [
+                            {"action": "navigate", "value": nav_url, "description": f"导航到 {nav_url}"}
+                        ] + search_action["steps"],
+                        "description": f"导航到 {nav_url} 并执行搜索"
+                    }
+
+            # 如果只是导航或不是已知可搜索站点，则只执行导航
             return {
                 "action": "navigate",
                 "value": nav_url,
                 "description": f"导航到 {nav_url}"
             }
-        
-        # 检查是否为已知站点的简单操作
+
+        # 新增逻辑：如果无导航意图，但有搜索意图，且当前页面为空，则默认使用Bing搜索
+        if not nav_url and self._intent_is_search(user_text) and (not page_data or not page_data.get("is_valid", True)):
+            bing_search_action = self._build_bing_pre_search(user_text)
+            # _build_bing_pre_search 包含了导航和等待，我们还需要添加后续的fill和click
+            search_on_bing_page = self._maybe_build_known_site_action(user_text, {"url": "https://www.bing.com"})
+            if bing_search_action and search_on_bing_page:
+                # 移除bing_pre_search中的等待，因为后续步骤会等待特定元素
+                bing_search_action["steps"].pop()
+                return {
+                    "steps": bing_search_action["steps"] + search_on_bing_page["steps"],
+                    "description": f"在Bing上搜索: {user_text}"
+                }
+            return bing_search_action
+
+        # 如果当前已在某个页面上，则检查是否为已知站点的简单操作
         simple_action = self._maybe_build_known_site_action(user_text, page_data)
         if simple_action:
             return simple_action
-            
+
         return None
 
     def _analyze_context(self, user_text: str, page_data: Dict[str, Any], 
@@ -261,19 +300,8 @@ class InstructionBuilder:
         if m:
             return m.group(0)
         
-        # 2) 中文网站名称到URL的映射
-        chinese_site_mapping = {
-            "百度": "https://www.baidu.com",
-            "谷歌": "https://www.google.com",
-            "google": "https://www.google.com",
-            "bing": "https://www.bing.com",
-            "必应": "https://www.bing.com",
-            "小红书": "https://www.xiaohongshu.com",
-            "知乎": "https://www.zhihu.com",
-            "微博": "https://www.weibo.com",
-            "淘宝": "https://www.taobao.com",
-            "京东": "https://www.jd.com"
-        }
+        # 2) 中文网站名称到URL的映射 (通过插件管理器获取)
+        chinese_site_mapping = self.plugin_manager.get_all_site_name_mappings()
         
         for site_name, url in chinese_site_mapping.items():
             if site_name in user_text.lower():
@@ -355,31 +383,18 @@ class InstructionBuilder:
                 return None
             query = self._extract_query_from_instruction(user_text)
             steps: List[Dict[str, Any]] = []
-            # 百度 - 使用精确的选择器策略
-            if "baidu.com" in host:
-                steps = [
-                    {"action": "wait", "selector": "input[name='wd'], #kw", "timeout": 5000, "description": "等待百度搜索框出现"},
-                    {"action": "fill", "selector": "input[name='wd'], #kw", "value": query, "description": f"在百度搜索框输入 '{query}'"},
-                    {"action": "click", "selector": "input[value='百度一下'], #su", "description": "点击百度搜索按钮"}
-                ]
-            # Bing - 使用精确的选择器策略
-            elif "bing.com" in host:
-                steps = [
-                    {"action": "wait", "selector": "input[name='q'], #sb_form_q", "timeout": 5000, "description": "等待Bing搜索框出现"},
-                    {"action": "fill", "selector": "input[name='q'], #sb_form_q", "value": query, "description": f"在Bing搜索框输入 '{query}'"},
-                    {"action": "click", "selector": "#sb_form_go, input[type='submit'][value='搜索']", "description": "点击Bing搜索按钮"}
-                ]
-            # Google - 使用精确的选择器策略
-            elif "google." in host:
-                steps = [
-                    {"action": "wait", "selector": "textarea[name='q'], input[name='q']", "timeout": 5000, "description": "等待Google搜索框出现"},
-                    {"action": "fill", "selector": "textarea[name='q'], input[name='q']", "value": query, "description": f"在Google搜索框输入 '{query}'"},
-                    {"action": "click", "selector": "input[name='btnK'], input[value='Google 搜索']", "description": "点击Google搜索按钮"}
-                ]
+            # 尝试通过网站插件构建搜索动作
+            website_plugin = self.plugin_manager.get_website_plugin(url)
+            if website_plugin:
+                steps = website_plugin.build_search_action(query)
+                if steps:
+                    return {"steps": steps, "description": f"站内搜索: {query}"}
+                else:
+                    return None
             else:
                 return None
-            return {"steps": steps, "description": f"站内搜索: {query}"}
-        except Exception:
+        except Exception as e:
+            self.logger.error(f"在已知站点（如百度/Bing/Google）上生成搜索动作的启发式异常: {e}")
             return None
 
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
@@ -524,7 +539,7 @@ class InstructionBuilder:
                 if step["action"] not in [
                     "navigate", "click", "fill", "select", "wait",
                     "screenshot", "extract", "scroll", "back",
-                    "forward", "refresh", "close", "error"
+                    "forward", "refresh", "close", "error", "wait_for_login"
                 ]:
                     raise ValueError(f"第{i + 1}步操作的类型'{step['action']}'不受支持")
                 if step["action"] == "navigate" and "value" not in step:
@@ -538,7 +553,7 @@ class InstructionBuilder:
             if instruction["action"] not in [
                 "navigate", "click", "fill", "select", "wait",
                 "screenshot", "extract", "scroll", "back",
-                "forward", "refresh", "close", "error"
+                "forward", "refresh", "close", "error", "wait_for_login"
             ]:
                 raise ValueError(f"操作类型'{instruction['action']}'不受支持")
             if instruction["action"] == "navigate" and "value" not in instruction:

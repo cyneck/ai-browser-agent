@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Union, Callable, Type
 
 from src.common.logger import get_logger
+from src.plugins.base_website_plugin import BaseWebsitePlugin
 
 
 class Plugin:
@@ -83,6 +84,8 @@ class PluginManager:
         
         # 插件字典，键为插件名称，值为插件实例
         self.plugins: Dict[str, Plugin] = {}
+        # 网站插件列表
+        self.website_plugins: List[BaseWebsitePlugin] = []
         
         # 加载插件
         self.load_plugins()
@@ -93,18 +96,25 @@ class PluginManager:
         
         # 遍历插件目录中的所有Python文件
         for _, name, is_pkg in pkgutil.iter_modules([str(self.plugin_dir)]):
-            if name.endswith("_plugin"):
+            if name.endswith(("_plugin", "_plugins")) and not is_pkg: # 确保只加载文件，不加载子包
                 try:
                     # 导入插件模块
                     module = importlib.import_module(f"src.plugins.{name}")
                     
-                    # 查找模块中的Plugin子类
+                    # 查找模块中的Plugin子类和BaseWebsitePlugin子类
                     for item_name, item in inspect.getmembers(module, inspect.isclass):
+                        if inspect.isabstract(item): # 忽略抽象基类
+                            continue
                         if issubclass(item, Plugin) and item != Plugin:
                             # 实例化插件并添加到插件字典
                             plugin = item()
                             self.plugins[plugin.name] = plugin
-                            self.logger.info(f"加载插件: {plugin.name} v{plugin.version}")
+                            self.logger.info(f"加载通用插件: {plugin.name} v{plugin.version}")
+                        elif issubclass(item, BaseWebsitePlugin) and item != BaseWebsitePlugin:
+                            # 实例化网站插件并添加到网站插件列表
+                            website_plugin = item()
+                            self.website_plugins.append(website_plugin)
+                            self.logger.info(f"加载网站插件: {item.__name__}")
                 except Exception as e:
                     self.logger.error(f"加载插件 {name} 失败: {str(e)}")
     
@@ -172,3 +182,30 @@ class PluginManager:
                 "message": "没有找到可以处理指令的插件",
                 "error": f"不支持的操作: {instruction.get('action')}"
             }
+
+    def get_website_plugin(self, url: str) -> Optional[BaseWebsitePlugin]:
+        """
+        根据URL查找并返回对应的网站插件。
+        
+        Args:
+            url: 当前页面的URL。
+            
+        Returns:
+            Optional[BaseWebsitePlugin]: 匹配的网站插件实例，如果不存在则返回None。
+        """
+        for plugin in self.website_plugins:
+            if plugin.can_handle_url(url):
+                return plugin
+        return None
+
+    def get_all_site_name_mappings(self) -> Dict[str, str]:
+        """
+        聚合所有网站插件的中文名称到URL的映射。
+        
+        Returns:
+            Dict[str, str]: 聚合后的映射字典。
+        """
+        all_mappings = {}
+        for plugin in self.website_plugins:
+            all_mappings.update(plugin.get_site_name_mapping())
+        return all_mappings

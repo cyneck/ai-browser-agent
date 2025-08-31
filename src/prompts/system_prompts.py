@@ -142,6 +142,25 @@ class SystemPrompts:
         2. 其次使用语义和内容选择器（has-text、aria-label）
         3. 确保每个选择器都尽可能匹配唯一元素
         4. 避免脆弱的选择器（位置选择器、过于宽泛的类选择器）
+
+        **高级搜索场景策略：**
+        当用户意图为“搜索”时，请遵循以下策略来确定输入框和按钮的选择器：
+        1.  **定位按钮**：首先在HTML中寻找与“搜索”相关的可点击元素。重点关注含有“搜索”、“查询”、“Search”、“Go”、“百度一下”等文本的 `<button>`, `<input type='submit'>`, 或 `<a>` 标签。
+        2.  **分析按钮上下文**：找到搜索按钮后，分析其周边的DOM结构。查看它的父元素 (`<form>`, `<div>` 等) 和相邻的兄弟元素。
+        3.  **关联输入框**：在按钮的上下文中，寻找最相关的输入字段，通常是 `<input type='text'>`, `<input type='search'>` 或 `<textarea>`。这个输入框通常与按钮共享一个共同的父级或祖父级元素。
+        4.  **生成选择器**：为找到的输入框和搜索按钮生成最精确的选择器。
+
+        **示例**
+        如果HTML结构如下：
+        ```html
+        <div id="form-container">
+          <textarea id="chat-textarea" name="wd"></textarea>
+          <div class="submit-wrapper">
+            <input type="submit" id="su" value="百度一下">
+          </div>
+        </div>
+        ```
+        你应该推断出 `textarea#chat-textarea` 是输入框，而 `input#su` 是提交按钮，即使它在视觉上可能被隐藏。然后生成相应的 `fill` 和 `click` 步骤。
         """
     
     def get_action_types(self) -> Dict[str, str]:

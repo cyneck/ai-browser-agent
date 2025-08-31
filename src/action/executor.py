@@ -53,9 +53,20 @@ class ActionExecutor:
             "refresh": self._execute_refresh,
             "close": self._execute_close,
             "error": self._execute_error,
+            "wait_for_login": self._execute_wait_for_login,
         }
         
         self.safety_validator = SafetyValidator(self.get_supported_actions())
+
+    def _execute_wait_for_login(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """暂停执行，等待用户手动登录"""
+        print("\n" + "="*50)
+        print("⏸️  检测到需要手动登录。")
+        print("请在浏览器中完成扫码登录或其他登录操作。")
+        input("完成后，请按 Enter 键继续执行...")
+        print("▶️  继续执行...")
+        print("="*50 + "\n")
+        return {"success": True, "message": "用户已确认登录，继续执行"}
 
     def get_supported_actions(self) -> List[str]:
         """获取当前支持的所有操作列表"""

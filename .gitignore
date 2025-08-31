@@ -140,7 +140,7 @@ browser-data/
 
 # ARIA snapshot debug files
 aria_snapshot_*.json
-jd_snapshot_*.json
+*_snapshot_*.json
 *_debug_*.json
 
 # AI and ML
@@ -237,7 +237,6 @@ test_downloads/
 # Prevent test clutter in root directory
 # --------------------------------------
 # Test files should be in tests/ directory only
-test_*.py
 !tests/
 # Demo files should be in examples/ directory
 demo_*.py
