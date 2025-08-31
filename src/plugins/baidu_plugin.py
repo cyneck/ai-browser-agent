@@ -27,7 +27,7 @@ class BaiduPlugin(BaseWebsitePlugin):
         为 Baidu 网站构建搜索动作的步骤列表。
         """
         return [
-            {"action": "wait", "selector": "#kw", "timeout": 5000, "description": "等待百度搜索框出现"},
-            {"action": "fill", "selector": "#kw", "value": query, "description": f"在百度搜索框输入 '{query}'"},
-            {"action": "click", "selector": "#su", "description": "点击百度搜索按钮"}
+            {"action": "wait", "selector": "#chat-textarea", "timeout": 5000, "description": "等待百度搜索框出现"},
+            {"action": "fill", "selector": "#chat-textarea", "value": query, "description": f"在百度搜索框输入 '{query}'"},
+            {"action": "click", "selector": "#chat-submit-button", "description": "点击百度搜索按钮"}
         ]

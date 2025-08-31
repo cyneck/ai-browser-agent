@@ -56,12 +56,20 @@ class InstructionBuilder:
 
             # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
             if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
+                # 先尝试使用插件管理器的智能回退功能
+                nav_url = self._detect_navigation_intent_and_url(user_text)
+                if nav_url:
+                    fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
+                    if fallback_instruction:
+                        return fallback_instruction
+                
                 nav_only = self._maybe_build_navigation_first(user_text)
                 if nav_only:
                     return nav_only
                 # 如果没有明确URL，则使用 Bing 前置检索
                 bing_pre_search = self._build_bing_pre_search(user_text)
                 if bing_pre_search:
+                    return bing_pre_search
                     return bing_pre_search
 
             # 在已加载页面上，尝试已知站点的启发式动作（如搜索框操作）
@@ -188,6 +196,12 @@ class InstructionBuilder:
     def _try_simple_heuristics(self, user_text: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """尝试简单的启发式规则，避免不必要的LLM调用"""
         nav_url = self._detect_navigation_intent_and_url(user_text)
+
+        # 使用插件管理器的智能回退功能处理所有网站限制
+        if nav_url:
+            fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
+            if fallback_instruction:
+                return fallback_instruction
 
         # 如果指令中包含导航URL，并且当前页面无效，则优先处理导航
         if nav_url and (not page_data or not page_data.get("is_valid", True)):
@@ -470,13 +484,16 @@ class InstructionBuilder:
         # 常见搜索模式
         patterns = [
             r"搜索[\s'\"]*([^'\"，。]+)",
-            r"查找[\s'\"]*([^'\"，。]+)",
+            r"查找[\s'\"]*([^'\"，。]+)", 
+            r"查询[\s'\"]*([^'\"，。]+)",
             r"在.+?搜索[\s'\"]*([^'\"，。]+)",
+            r"在.+?查找[\s'\"]*([^'\"，。]+)",
+            r"在.+?查询[\s'\"]*([^'\"，。]+)",
             r"输入[\s'\"]*([^'\"，。]+)[\s'\"]*并.*?搜索",
             r"'([^']+)'",
             r'"([^"]+)"',
             r"([^，。！？；：]+(?:秋天|春天|夏天|冬天))",
-            r"(小红书|北京|上海|广州|深圳)"
+            r"([^，。！？；：]+(?:附近|美食|推荐|打卡点|食谱))"
         ]
         
         for pattern in patterns:
@@ -488,13 +505,32 @@ class InstructionBuilder:
         
         # 如果没有匹配到特定模式，尝试提取核心词汇
         # 移除常见的动词和介词
-        cleaned = re.sub(r"(打开|访问|进入|搜索|查找|点击|输入|在|上|的|并|然后|请|帮我)", "", instruction)
+        cleaned = re.sub(r"(打开|访问|进入|搜索|查找|查询|点击|输入|在|上|的|并|然后|请|帮我|小红书)", "", instruction)
         cleaned = cleaned.strip()
         
         if cleaned:
             return cleaned
         
         return instruction.strip()
+
+    def _build_xiaohongshu_fallback_strategy(self, user_text: str) -> Dict[str, Any]:
+        """构建小红书的内置回退策略（当插件不可用时）"""
+        # 提取搜索关键词
+        keywords = self._extract_search_keywords(user_text)
+        
+        return {
+            "steps": [
+                {"action": "navigate", "value": "https://www.baidu.com", "description": "导航到百度"},
+                {"action": "wait", "selector": "#kw", "timeout": 5000, "description": "等待百度搜索框"},
+                {"action": "fill", "selector": "#kw", "value": f"site:xiaohongshu.com {keywords}", "description": f"搜索小红书站内内容: {keywords}"},
+                {"action": "click", "selector": "#su", "description": "点击百度搜索"}
+            ],
+            "description": f"通过百度搜索小红书内容: {keywords}",
+            "fallback_info": {
+                "reason": "小红书可能存在网络访问限制（错误代码300012）",
+                "strategy": "使用百度站内搜索作为替代方案"
+            }
+        }
     
     def _detect_basic_action(self, instruction: str) -> Dict[str, Any]:
         """检测基础操作"""

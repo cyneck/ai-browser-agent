@@ -209,3 +209,102 @@ class PluginManager:
         for plugin in self.website_plugins:
             all_mappings.update(plugin.get_site_name_mapping())
         return all_mappings
+    
+    def build_instruction_with_fallback(self, user_text: str, target_url: str) -> Optional[Dict[str, Any]]:
+        """
+        为指定网站构建指令，如果网站存在访问限制则使用回退策略。
+        
+        Args:
+            user_text: 用户输入的自然语言文本
+            target_url: 目标网站URL
+            
+        Returns:
+            构建的指令，如果需要回退策略则包含fallback信息
+        """
+        plugin = self.get_website_plugin(target_url)
+        if not plugin:
+            return None
+            
+        # 检查是否存在访问限制
+        if plugin.has_access_restrictions():
+            # 提取搜索关键词
+            query = self._extract_search_keywords_from_text(user_text)
+            
+            # 获取回退策略
+            fallback_strategies = plugin.build_fallback_strategies(query)
+            if fallback_strategies:
+                # 使用第一个策略作为主要策略
+                primary_strategy = fallback_strategies[0]
+                return {
+                    "steps": primary_strategy["steps"],
+                    "description": f"网络限制回退: {primary_strategy['description']}",
+                    "fallback_info": {
+                        "reason": f"该网站存在访问限制",
+                        "primary_strategy": primary_strategy["description"],
+                        "alternative_strategies": [s["description"] for s in fallback_strategies[1:]]
+                    }
+                }
+        
+        # 正常情况下，如果是纯导航指令（没有搜索意图），返回None让上层处理
+        if not self._has_search_intent(user_text):
+            return None
+            
+        # 只有在有搜索意图时才构建搜索指令
+        query = self._extract_search_keywords_from_text(user_text)
+        search_steps = plugin.build_search_action(query)
+        if search_steps:
+            return {
+                "steps": [{"action": "navigate", "value": target_url, "description": f"导航到 {target_url}"}] + search_steps,
+                "description": f"在网站上搜索: {query}"
+            }
+        
+        return None
+    
+    def _has_search_intent(self, user_text: str) -> bool:
+        """
+        检测用户文本是否包含搜索意图。
+        
+        Args:
+            user_text: 用户输入的自然语言文本
+            
+        Returns:
+            如果包含搜索意图则返回True
+        """
+        import re
+        return bool(re.search(r"(搜索|查询|找|查找|search)", user_text, re.IGNORECASE))
+    
+    def _extract_search_keywords_from_text(self, user_text: str) -> str:
+        """
+        从用户文本中提取搜索关键词。
+        
+        Args:
+            user_text: 用户输入的自然语言文本
+            
+        Returns:
+            提取的搜索关键词
+        """
+        import re
+        
+        # 常见搜索模式
+        patterns = [
+            r"搜索[\s'\"]*([^'\"\uff0c\u3002]+)",
+            r"查找[\s'\"]*([^'\"\uff0c\u3002]+)",
+            r"查询[\s'\"]*([^'\"\uff0c\u3002]+)",
+            r"在.+?搜索[\s'\"]*([^'\"\uff0c\u3002]+)",
+            r"打开.+?，查询(.+)",
+            r"去.+?找(.+)",
+            r"在.+?查找(.+)",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, user_text)
+            if match:
+                keyword = match.group(1).strip()
+                if len(keyword) > 1:
+                    return keyword
+        
+        # 如果没有匹配到特定模式，移除常见动词后返回
+        cleaned = re.sub(r"(打开|访问|进入|搜索|查找|点击|输入|在|上|的|并|然后|请|帮我|网站|查询)", "", user_text)
+        cleaned = cleaned.strip()
+        
+        return cleaned if cleaned else user_text.strip()

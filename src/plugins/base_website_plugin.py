@@ -42,3 +42,25 @@ class BaseWebsitePlugin(ABC):
             一个包含搜索步骤的列表，如果无法构建则返回None。
         """
         pass
+    
+    def has_access_restrictions(self) -> bool:
+        """
+        检查该网站是否存在访问限制。
+        
+        Returns:
+            如果网站存在访问限制则返回True，否则返回False。
+        """
+        return False
+    
+    def build_fallback_strategies(self, query: str) -> Optional[List[Dict[str, Any]]]:
+        """
+        为存在访问限制的网站构建回退策略。
+        
+        Args:
+            query: 用户输入的搜索关键词。
+            
+        Returns:
+            包含多个回退策略的列表，每个策略包含description和steps。
+            如果不需要回退策略则返回None。
+        """
+        return None
