@@ -111,6 +111,8 @@ class SystemPrompts:
         - 如果需要导航，必须包含导航后的后续操作
         - 先分析当前页面状态，再确定是否需要导航
         - 生成的指令应能一次性完成用户的完整需求
+        - **搜索完成后应使用 extract_results 提取结果，而不是 close 关闭页面**
+        - **避免在查询操作后自动关闭浏览器，用户可能需要查看结果**
         
         输出格式：严格按照JSON格式，优先使用多步骤指令：
         ```json
@@ -135,6 +137,7 @@ class SystemPrompts:
         - select: 在下拉菜单中选择选项
         - screenshot: 截取屏幕截图
         - extract: 提取页面内容
+        - extract_results: 专门提取搜索结果内容（推荐用于搜索完成后）
         - scroll: 滚动页面
         
         选择器生成原则：
@@ -142,6 +145,11 @@ class SystemPrompts:
         2. 其次使用语义和内容选择器（has-text、aria-label）
         3. 确保每个选择器都尽可能匹配唯一元素
         4. 避免脆弱的选择器（位置选择器、过于宽泛的类选择器）
+        
+        **搜索操作指导**：
+        - 搜索步骤：导航 → 等待 → 输入关键词 → 点击搜索 → 等待结果 → **extract_results**
+        - 绝对不要在搜索后使用 close 动作，这会丢失搜索结果
+        - 用 extract_results 而不是 extract 来提取搜索结果，更加准确
 
         **高级搜索场景策略：**
         当用户意图为“搜索”时，请遵循以下策略来确定输入框和按钮的选择器：
@@ -177,6 +185,7 @@ class SystemPrompts:
             "wait": "等待指定时间或元素出现",
             "screenshot": "截取屏幕截图",
             "extract": "提取页面内容",
+            "extract_results": "专门提取搜索结果内容",
             "scroll": "滚动页面",
             "back": "返回上一页",
             "forward": "前进到下一页", 

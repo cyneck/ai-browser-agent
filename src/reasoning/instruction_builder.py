@@ -605,7 +605,7 @@ class InstructionBuilder:
                     raise ValueError(f"第{i + 1}步操作缺少必需的'action'字段")
                 if step["action"] not in [
                     "navigate", "click", "fill", "select", "wait",
-                    "screenshot", "extract", "scroll", "back",
+                    "screenshot", "extract", "extract_results", "scroll", "back",
                     "forward", "refresh", "close", "error", "wait_for_login"
                 ]:
                     raise ValueError(f"第{i + 1}步操作的类型'{step['action']}'不受支持")
@@ -619,7 +619,7 @@ class InstructionBuilder:
         else:
             if instruction["action"] not in [
                 "navigate", "click", "fill", "select", "wait",
-                "screenshot", "extract", "scroll", "back",
+                "screenshot", "extract", "extract_results", "scroll", "back",
                 "forward", "refresh", "close", "error", "wait_for_login"
             ]:
                 raise ValueError(f"操作类型'{instruction['action']}'不受支持")

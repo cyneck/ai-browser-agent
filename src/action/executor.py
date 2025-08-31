@@ -53,6 +53,7 @@ class ActionExecutor:
             "wait": self._execute_wait,
             "screenshot": self._execute_screenshot,
             "extract": self._execute_extract,
+            "extract_results": self._execute_extract_results,
             "scroll": self._execute_scroll,
             "back": self._execute_back,
             "forward": self._execute_forward,
@@ -362,6 +363,30 @@ class ActionExecutor:
         else:
             content = self.page.content()
             return {"success": True, "message": "成功提取页面内容", "content": content}
+            
+    def _execute_extract_results(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """专门用于提取搜索结果的动作"""
+        try:
+            search_results = self._extract_search_results()
+            if search_results:
+                return {
+                    "success": True, 
+                    "message": f"成功提取 {len(search_results)} 条搜索结果",
+                    "content": search_results,
+                    "search_results": search_results  # 保持向后兼容
+                }
+            else:
+                return {
+                    "success": False, 
+                    "message": "未找到搜索结果",
+                    "content": []
+                }
+        except Exception as e:
+            return {
+                "success": False, 
+                "message": f"提取搜索结果时出错: {str(e)}",
+                "error": str(e)
+            }
 
     def _execute_scroll(self, step: Dict[str, Any]) -> Dict[str, Any]:
         if "selector" in step:
@@ -399,12 +424,146 @@ class ActionExecutor:
         return {"success": True, "message": "成功刷新页面"}
 
     def _execute_close(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        # 在关闭页面前，尝试提取重要内容
+        extracted_content = None
+        try:
+            # 如果页面上有搜索结果，先提取再关闭
+            current_url = self.page.url
+            if any(domain in current_url for domain in ["baidu.com", "bing.com", "google.com", "xiaohongshu.com"]):
+                # 提取搜索结果
+                search_results = self._extract_search_results()
+                if search_results:
+                    extracted_content = search_results
+                    self.logger.info(f"在关闭页面前提取到搜索结果: {len(search_results)} 条")
+        except Exception as e:
+            self.logger.warning(f"提取页面内容时出错: {e}")
+        
+        # 关闭页面
         self.page.close()
-        return {"success": True, "message": "成功关闭页面"}
+        
+        result = {"success": True, "message": "成功关闭页面"}
+        if extracted_content:
+            result["extracted_content"] = extracted_content
+            result["message"] = f"成功关闭页面并提取了 {len(extracted_content)} 条结果"
+        
+        return result
 
     def _execute_error(self, step: Dict[str, Any]) -> Dict[str, Any]:
         error_message = step.get("error", "未知错误")
         return {"success": False, "message": "执行错误指令", "error": error_message}
+        
+    def _extract_search_results(self) -> List[Dict[str, Any]]:
+        """提取当前页面的搜索结果"""
+        results = []
+        try:
+            current_url = self.page.url
+            
+            # 根据不同的搜索引擎使用不同的选择器
+            if "baidu.com" in current_url:
+                # 百度搜索结果
+                result_elements = self.page.locator(".result, .c-container").all()
+                for i, element in enumerate(result_elements[:10]):  # 只取前10个结果
+                    try:
+                        title_elem = element.locator("h3 a, .t a").first
+                        desc_elem = element.locator(".c-abstract, .c-span9").first
+                        
+                        title = title_elem.inner_text() if title_elem.count() > 0 else "无标题"
+                        description = desc_elem.inner_text() if desc_elem.count() > 0 else "无描述"
+                        href = title_elem.get_attribute("href") if title_elem.count() > 0 else ""
+                        
+                        results.append({
+                            "title": title.strip(),
+                            "description": description.strip()[:200],  # 限制描述长度
+                            "url": href,
+                            "index": i + 1
+                        })
+                    except Exception:
+                        continue
+                        
+            elif "bing.com" in current_url:
+                # 必应搜索结果
+                result_elements = self.page.locator(".b_algo").all()
+                for i, element in enumerate(result_elements[:10]):
+                    try:
+                        title_elem = element.locator("h2 a").first
+                        desc_elem = element.locator(".b_caption p").first
+                        
+                        title = title_elem.inner_text() if title_elem.count() > 0 else "无标题"
+                        description = desc_elem.inner_text() if desc_elem.count() > 0 else "无描述"
+                        href = title_elem.get_attribute("href") if title_elem.count() > 0 else ""
+                        
+                        results.append({
+                            "title": title.strip(),
+                            "description": description.strip()[:200],
+                            "url": href,
+                            "index": i + 1
+                        })
+                    except Exception:
+                        continue
+                        
+            elif "google.com" in current_url:
+                # Google搜索结果
+                result_elements = self.page.locator(".g").all()
+                for i, element in enumerate(result_elements[:10]):
+                    try:
+                        title_elem = element.locator("h3").first
+                        desc_elem = element.locator(".VwiC3b").first
+                        link_elem = element.locator("a").first
+                        
+                        title = title_elem.inner_text() if title_elem.count() > 0 else "无标题"
+                        description = desc_elem.inner_text() if desc_elem.count() > 0 else "无描述"
+                        href = link_elem.get_attribute("href") if link_elem.count() > 0 else ""
+                        
+                        results.append({
+                            "title": title.strip(),
+                            "description": description.strip()[:200],
+                            "url": href,
+                            "index": i + 1
+                        })
+                    except Exception:
+                        continue
+                        
+            elif "xiaohongshu.com" in current_url:
+                # 小红书搜索结果
+                result_elements = self.page.locator(".note-item, .feed-item").all()
+                for i, element in enumerate(result_elements[:10]):
+                    try:
+                        title_elem = element.locator(".title, .note-title").first
+                        desc_elem = element.locator(".desc, .note-text").first
+                        
+                        title = title_elem.inner_text() if title_elem.count() > 0 else "无标题"
+                        description = desc_elem.inner_text() if desc_elem.count() > 0 else "无描述"
+                        
+                        results.append({
+                            "title": title.strip(),
+                            "description": description.strip()[:200],
+                            "index": i + 1,
+                            "platform": "小红书"
+                        })
+                    except Exception:
+                        continue
+            
+            # 如果没有找到特定的搜索结果，尝试通用选择器
+            if not results:
+                generic_results = self.page.locator("a").all()
+                for i, element in enumerate(generic_results[:5]):  # 只取前5个链接
+                    try:
+                        text = element.inner_text().strip()
+                        href = element.get_attribute("href") or ""
+                        if text and len(text) > 5:  # 过滤太短的文本
+                            results.append({
+                                "title": text[:100],  # 限制标题长度
+                                "url": href,
+                                "index": i + 1,
+                                "type": "通用链接"
+                            })
+                    except Exception:
+                        continue
+                        
+        except Exception as e:
+            self.logger.error(f"提取搜索结果时出错: {e}")
+            
+        return results
         
     def get_behavior_stats(self) -> Dict[str, Any]:
         """获取人类行为模拟统计信息"""
