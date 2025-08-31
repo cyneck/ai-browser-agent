@@ -8,15 +8,11 @@
 """
 
 import json
-import os
-import re
 import time
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Union, Callable
-
-from jinja2 import Template, Environment, FileSystemLoader
-from playwright.sync_api import Page
 import base64
+from typing import Dict, Any, List, Optional, Callable
+
+from playwright.sync_api import Page, Error as PlaywrightError
 
 from src.common.logger import get_logger
 from src.action.state_manager import StateManager
@@ -26,580 +22,242 @@ from src.action.safety_validator import SafetyValidator
 
 class ActionExecutor:
     """动作执行器类，负责安全地执行指令"""
-    
-    def __init__(self, page: Page, state_manager: Optional[StateManager] = None, error_handler: Optional[ErrorHandler] = None):
+
+    def __init__(self, page: Page, state_manager: Optional[StateManager] = None,
+                 error_handler: Optional[ErrorHandler] = None):
         """初始化动作执行器
-        
+
         Args:
             page: Playwright页面对象
+            state_manager: 状态管理器
+            error_handler: 错误处理器
         """
         self.logger = get_logger()
         self.page = page
-        self.template_env = self._setup_template_env()
-        self.execution_namespace = {
-            "__builtins__": {
-                "Exception": Exception,
-                "str": str,
-                "int": int,
-                "float": float,
-                "bool": bool,
-                "list": list,
-                "dict": dict,
-                "len": len,
-                "range": range,
-                "enumerate": enumerate,
-                "zip": zip
-            }
-        }
-        self._setup_execution_namespace()
         self.state_manager = state_manager or StateManager()
         self.error_handler = error_handler or ErrorHandler()
+
+        # 将 action 名称映射到对应的处理方法
+        self.action_handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+            "navigate": self._execute_navigate,
+            "click": self._execute_click,
+            "fill": self._execute_fill,
+            "type": self._execute_fill,  # 'type' is an alias for 'fill'
+            "select": self._execute_select,
+            "wait": self._execute_wait,
+            "screenshot": self._execute_screenshot,
+            "extract": self._execute_extract,
+            "scroll": self._execute_scroll,
+            "back": self._execute_back,
+            "forward": self._execute_forward,
+            "refresh": self._execute_refresh,
+            "close": self._execute_close,
+            "error": self._execute_error,
+        }
+        
         self.safety_validator = SafetyValidator(self.get_supported_actions())
-    
+
+    def get_supported_actions(self) -> List[str]:
+        """获取当前支持的所有操作列表"""
+        return list(self.action_handlers.keys())
+
     def execute(self, instruction: Dict[str, Any], session_state: Dict[str, Any],
                 timeout: int = 60) -> Dict[str, Any]:
-        """执行指令（统一的多步执行方式）
-        
+        """
+        执行指令（统一的多步执行方式）
+
         Args:
             instruction: 标准化的JSON格式指令
             session_state: 会话状态
             timeout: 执行超时时间（秒）
-            
+
         Returns:
-            Dict[str, Any]: 执行结果
+            执行结果
         """
         try:
-            # 记录指令
-            self.logger.info(f"执行指令:")
-            self.logger.info(f"{'='*60}")
-            self.logger.info(json.dumps(instruction, ensure_ascii=False, indent=2))
-            self.logger.info(f"{'='*60}")
-            
-            # 更新执行命名空间
-            self.execution_namespace.update({
-                "page": self.page,
-                "session_state": session_state,
-                "instruction": instruction
-            })
-            
-            # 先进行安全校验与转义
+            self.logger.info("=" * 60)
+            self.logger.info(f"执行指令: {json.dumps(instruction, ensure_ascii=False, indent=2)}")
+            self.logger.info("=" * 60)
+
+            # 安全校验与转义
             instruction = self.safety_validator.validate_and_sanitize(instruction)
 
-            # 标准化为多步格式：如果不是多步指令，转换为单步的多步指令
+            # 标准化为多步格式
             if "steps" not in instruction:
                 instruction = self._normalize_to_multi_step(instruction)
-            
-            # 统一使用多步执行
+
             return self._execute_steps(instruction, timeout)
         except Exception as e:
-            return self.error_handler.handle_error(e, instruction, {
-                "session_state": session_state
-            })
+            return self.error_handler.handle_error(e, instruction, {"session_state": session_state})
 
-    def get_supported_actions(self) -> List[str]:
-        try:
-            return [t[:-3] for t in self.template_env.list_templates(filter_func=lambda n: n.endswith('.j2'))]
-        except Exception:
-            # 回退到固定集合（与创建模板一致）
-            return [
-                "navigate", "click", "fill", "select", "wait",
-                "screenshot", "extract", "scroll", "back", "forward",
-                "refresh", "close", "error"
-            ]
-    
-    def _setup_template_env(self) -> Environment:
-        """设置模板环境
-        
-        Returns:
-            Environment: Jinja2模板环境
-        """
-        # 获取模板目录路径
-        template_dir = Path(__file__).parent / "templates"
-        
-        # 如果模板目录不存在，创建它
-        if not template_dir.exists():
-            template_dir.mkdir(parents=True)
-            
-            # 创建基本模板文件
-            self._create_basic_templates(template_dir)
-        
-        # 创建Jinja2环境
-        env = Environment(loader=FileSystemLoader(template_dir))
-        
-        env.filters['extract_search_query'] = self._extract_search_query
-        env.filters['json_dumps'] = json.dumps
-        env.filters['b64encode'] = lambda s: base64.b64encode(s.encode('utf-8')).decode('utf-8')
-        env.filters['b64decode'] = lambda s: base64.b64decode(s.encode('utf-8')).decode('utf-8')
-        return env
-    
-    def _extract_search_query(self, instruction: Dict[str, Any]) -> str:
-        """从指令中提取搜索关键词"""
-        search_instruction = instruction.get("value", "")
-        match = re.search(r'在(?:www\.)?(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?:/[^\s]*)?上搜索(.+)', search_instruction)
-        if match:
-            return match.group(1).strip()
-        return search_instruction
-
-    def _create_basic_templates(self, template_dir: Path):
-        """创建基本模板文件
-        
-        Args:
-            template_dir: 模板目录路径
-        """
-        # 导航模板
-        navigate_template = """
-# 导航到指定URL
-try:
-    page.goto("{{ instruction.value }}", wait_until="domcontentloaded")
-    result = {
-        "success": True,
-        "message": "成功导航到 {{ instruction.value }}"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "导航失败",
-        "error": str(e)
-    }
-"""
-        
-        # 点击模板
-        click_template = """
-# 点击元素
-try:
-    element = page.locator("{{ instruction.selector }}")
-    element.click()
-    result = {
-        "success": True,
-        "message": "成功点击元素 {{ instruction.selector }}"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "点击失败",
-        "error": str(e)
-    }
-"""
-        
-        # 填充模板（填充输入框）
-        fill_template = """
-# 在输入框中输入文本
-try:
-    element = page.locator("{{ instruction.selector }}")
-    element.fill("{{ instruction.value }}")
-    result = {
-        "success": True,
-        "message": "成功在 {{ instruction.selector }} 中输入文本"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "输入失败",
-        "error": str(e)
-    }
-"""
-        
-        # 选择模板
-        select_template = """
-# 在下拉菜单中选择选项
-try:
-    element = page.locator("{{ instruction.selector }}")
-    element.select_option(value="{{ instruction.value }}")
-    result = {
-        "success": True,
-        "message": "成功在 {{ instruction.selector }} 中选择选项 {{ instruction.value }}"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "选择失败",
-        "error": str(e)
-    }
-"""
-        
-        # 等待模板
-        wait_template = """
-# 等待指定时间或元素出现
-try:
-    {% if instruction.selector %}
-    page.wait_for_selector("{{ instruction.selector }}", timeout={{ instruction.timeout|default(30000) }})
-    result = {
-        "success": True,
-        "message": "成功等待元素 {{ instruction.selector }} 出现"
-    }
-    {% elif instruction.value %}
-    page.wait_for_timeout({{ instruction.value }})
-    result = {
-        "success": True,
-        "message": "成功等待 {{ instruction.value }} 毫秒"
-    }
-    {% else %}
-    page.wait_for_load_state("domcontentloaded")
-    result = {
-        "success": True,
-        "message": "成功等待页面加载"
-    }
-    {% endif %}
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "等待失败",
-        "error": str(e)
-    }
-"""
-        
-        # 截图模板
-        screenshot_template = """
-# 截取屏幕截图
-try:
-    screenshot_bytes = page.screenshot()
-    import base64
-    screenshot_base64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-    result = {
-        "success": True,
-        "message": "成功截取屏幕截图",
-        "screenshot": screenshot_base64
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "截图失败",
-        "error": str(e)
-    }
-"""
-        
-        # 提取内容模板
-        extract_template = """
-# 提取页面内容
-try:
-    {% if instruction.selector %}
-    element = page.locator("{{ instruction.selector }}")
-    content = element.inner_text()
-    result = {
-        "success": True,
-        "message": "成功提取内容",
-        "content": content
-    }
-    {% else %}
-    content = page.content()
-    result = {
-        "success": True,
-        "message": "成功提取页面内容",
-        "content": content
-    }
-    {% endif %}
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "提取内容失败",
-        "error": str(e)
-    }
-"""
-        
-        # 滚动模板
-        scroll_template = """
-# 滚动页面
-try:
-    {% if instruction.selector %}
-    element = page.locator("{{ instruction.selector }}")
-    element.scroll_into_view_if_needed()
-    result = {
-        "success": True,
-        "message": "成功滚动到元素 {{ instruction.selector }}"
-    }
-    {% elif instruction.value %}
-    page.evaluate("window.scrollBy(0, {{ instruction.value }})")
-    result = {
-        "success": True,
-        "message": "成功滚动页面 {{ instruction.value }} 像素"
-    }
-    {% else %}
-    page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-    result = {
-        "success": True,
-        "message": "成功滚动到页面底部"
-    }
-    {% endif %}
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "滚动失败",
-        "error": str(e)
-    }
-"""
-        
-        # 返回上一页模板
-        back_template = """
-# 返回上一页
-try:
-    page.go_back()
-    result = {
-        "success": True,
-        "message": "成功返回上一页"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "返回上一页失败",
-        "error": str(e)
-    }
-"""
-        
-        # 前进到下一页模板
-        forward_template = """
-# 前进到下一页
-try:
-    page.go_forward()
-    result = {
-        "success": True,
-        "message": "成功前进到下一页"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "前进到下一页失败",
-        "error": str(e)
-    }
-"""
-        
-        # 刷新页面模板
-        refresh_template = """
-# 刷新页面
-try:
-    page.reload()
-    result = {
-        "success": True,
-        "message": "成功刷新页面"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "刷新页面失败",
-        "error": str(e)
-    }
-"""
-        
-        # 关闭页面模板
-        close_template = """
-# 关闭当前页面
-try:
-    page.close()
-    result = {
-        "success": True,
-        "message": "成功关闭页面"
-    }
-except Exception as e:
-    result = {
-        "success": False,
-        "message": "关闭页面失败",
-        "error": str(e)
-    }
-"""
-        
-        # 错误模板
-        error_template = """
-# 错误处理
-result = {
-    "success": False,
-    "message": "无法执行指令",
-    "error": "{{ instruction.error|default('未知错误') }}"
-}
-"""
-        
-        # 创建模板文件
-        templates = {
-            "navigate.j2": navigate_template,
-            "click.j2": click_template,
-            "fill.j2": fill_template,
-            "select.j2": select_template,
-            "wait.j2": wait_template,
-            "screenshot.j2": screenshot_template,
-            "extract.j2": extract_template,
-            "scroll.j2": scroll_template,
-            "back.j2": back_template,
-            "forward.j2": forward_template,
-            "refresh.j2": refresh_template,
-            "close.j2": close_template,
-            "error.j2": error_template
-        }
-        
-        for filename, content in templates.items():
-            with open(template_dir / filename, "w", encoding="utf-8") as f:
-                f.write(content)
-    
-    def _setup_execution_namespace(self):
-        """设置执行命名空间"""
-        # 基本工具函数
-        def ask_user(prompt: str, password: bool = False) -> str:
-            """向用户请求输入"""
-            if password:
-                import getpass
-                return getpass.getpass(prompt)
-            else:
-                return input(prompt)
-        
-        def extract_search_query(instruction: str) -> str:
-            """从指令中提取搜索关键词"""
-            search_patterns = [
-                r"搜索[\s]*([^\n]+)",
-                r"查找[\s]*([^\n]+)",
-                r"search[\s]*for[\s]*([^\n]+)",
-                r"search[\s]*([^\n]+)"
-            ]
-            
-            for pattern in search_patterns:
-                match = re.search(pattern, instruction, re.IGNORECASE)
-                if match:
-                    return match.group(1).strip()
-            
-            # 如果没有匹配，返回整个指令
-            return instruction
-
-        def to_base64(binary: bytes) -> str:
-            return base64.b64encode(binary).decode("utf-8")
-        
-        # 更新命名空间
-        self.execution_namespace.update({
-            "ask_user": ask_user,
-            "extract_search_query": extract_search_query,
-            "time": time,
-            "re": re,
-            "to_base64": to_base64
-        })
-    
     def _normalize_to_multi_step(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
-        """将单步指令标准化为多步格式
-        
-        Args:
-            instruction: 单步指令
-            
-        Returns:
-            Dict[str, Any]: 多步格式的指令
-        """
+        """将单步指令标准化为多步格式"""
         return {
             "steps": [instruction],
-            "description": instruction.get("description", f"执行{instruction.get('action', '未知')}操作")
+            "description": instruction.get("description", f"执行 {instruction.get('action', '未知')} 操作")
         }
-    
+
     def _execute_steps(self, instruction: Dict[str, Any], timeout: int) -> Dict[str, Any]:
-        """统一的步骤执行方法
-        
-        Args:
-            instruction: 包含steps的多步指令
-            timeout: 执行超时时间（秒）
-            
-        Returns:
-            Dict[str, Any]: 执行结果
-        """
+        """统一的步骤执行方法"""
         steps = instruction.get("steps", [])
-        description = instruction.get("description", "执行操作")
-        
+        description = instruction.get("description", "执行复合操作")
         self.logger.info(f"开始执行操作: {description}")
-        
-        # 记录每一步的结果
+
         step_results = []
         overall_success = True
         error_message = ""
-        
-        # 设置超时时间
         start_time = time.time()
-        
-        # 逐步执行
+
         for i, step in enumerate(steps):
-            # 检查是否超时
             if time.time() - start_time > timeout:
+                error_message = f"执行超时（超过 {timeout} 秒）"
                 overall_success = False
-                error_message = f"执行超时（{timeout}秒）"
                 break
-            
-            # 执行单个步骤
+
             step_result = self._execute_step(step)
             step_results.append(step_result)
-            
-            # 如果某一步失败，整体操作失败
+
             if not step_result.get("success", False):
+                error_message = f"第 {i + 1} 步操作失败: {step_result.get('message', '未知错误')}"
                 overall_success = False
-                error_message = f"第{i+1}步操作失败: {step_result.get('error', '未知错误')}"
                 break
         
-        # 构建整体结果
+        final_message = description if overall_success else error_message
+        
         result = {
             "success": overall_success,
-            "message": description if overall_success else error_message,
+            "message": final_message,
             "step_results": step_results
         }
-        
-        # 对于单步操作（只有一个step），简化返回结果
+
+        # For single-step operations, merge the step result into the main result
         if len(steps) == 1 and step_results:
-            # 保留step_results以便调试，但使用单步的消息
             single_result = step_results[0]
-            result["message"] = single_result.get("message", result["message"])
-        
-        if not overall_success and error_message:
+            result.update(single_result)
+            # Overwrite the generic message with the specific one from the step
+            result["message"] = single_result.get("message", final_message)
+
+        if not overall_success:
+            # This is the high-level error, but the specific error from the step
+            # is preserved via the update() above.
             result["error"] = error_message
-        
+
         return result
-    
-    def _execute_step(self, step: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
-        """执行单个步骤
-        
-        Args:
-            step: 单个步骤指令
-            timeout: 步骤超时时间（秒）
-            
-        Returns:
-            Dict[str, Any]: 步骤执行结果
-        """
+
+    def _execute_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行单个步骤"""
         action = step.get("action")
-        description = step.get("description", f"执行{action}操作")
-        
+        description = step.get("description", f"执行 {action} 操作")
         self.logger.info(f"执行步骤: {action} - {description}")
-        self.logger.info(f"步骤详情: {json.dumps(step, ensure_ascii=False, indent=2)}")
-        
-        # 模板别名映射（兼容历史 action）
-        action_template_name = action
-        if action == "type":
-            action_template_name = "fill"
-        
-        # 获取对应的模板
-        try:
-            template = self.template_env.get_template(f"{action_template_name}.j2")
-        except Exception as e:
-            self.logger.error(f"获取模板失败: {str(e)}")
+
+        handler = self.action_handlers.get(action)
+        if not handler:
             return {
                 "success": False,
                 "message": f"不支持的操作类型: {action}",
-                "error": str(e)
+                "error": f"未找到操作 '{action}' 的处理器。"
             }
-        
-        # 渲染模板
+
         try:
-            code = template.render(instruction=step)
-            # 添加调试输出：打印生成的代码
-            self.logger.info(f"生成的执行代码:")
-            self.logger.info(f"{'='*50}")
-            self.logger.info(code)
-            self.logger.info(f"{'='*50}")
-        except Exception as e:
-            self.logger.error(f"渲染模板失败: {str(e)}")
-            return {
-                "success": False,
-                "message": "渲染模板失败",
-                "error": str(e)
-            }
-        
-        # 执行代码
-        try:
-            local_vars = {}
-            exec(code, self.execution_namespace, local_vars)
-            result = local_vars.get("result", {
-                "success": False,
-                "message": "执行代码未返回结果",
-                "error": "未知错误"
-            })
-            if isinstance(result, dict) and result.get("success"):
+            result = handler(step)
+            if result.get("success"):
                 self.state_manager.set_state("last_action", action)
                 self.state_manager.set_state("last_message", result.get("message"))
             return result
+        except PlaywrightError as e:
+            return self.error_handler.handle_error(e, step, {})
         except Exception as e:
             return self.error_handler.handle_error(e, step, {})
+
+    # --- Action Handler Methods ---
+
+    def _execute_navigate(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        url = step.get("value")
+        if not url:
+            return {"success": False, "message": "导航失败：URL为空"}
+        self.page.goto(url, wait_until="domcontentloaded")
+        return {"success": True, "message": f"成功导航到 {url}"}
+
+    def _execute_click(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        selector = step.get("selector")
+        if not selector:
+            return {"success": False, "message": "点击失败：选择器为空"}
+        self.page.locator(selector).click()
+        return {"success": True, "message": f"成功点击元素 {selector}"}
+
+    def _execute_fill(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        selector = step.get("selector")
+        value = step.get("value", "")
+        if not selector:
+            return {"success": False, "message": "输入失败：选择器为空"}
+        self.page.locator(selector).fill(value)
+        return {"success": True, "message": f"成功在 {selector} 中输入文本"}
+
+    def _execute_select(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        selector = step.get("selector")
+        value = step.get("value")
+        if not selector or not value:
+            return {"success": False, "message": "选择失败：选择器或值为空"}
+        self.page.locator(selector).select_option(value=value)
+        return {"success": True, "message": f"成功在 {selector} 中选择 {value}"}
+
+    def _execute_wait(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if "selector" in step:
+            timeout = step.get("timeout", 30000)
+            self.page.wait_for_selector(step["selector"], timeout=timeout)
+            return {"success": True, "message": f"成功等待元素 {step['selector']} 出现"}
+        elif "value" in step:
+            timeout_ms = int(step["value"])
+            self.page.wait_for_timeout(timeout_ms)
+            return {"success": True, "message": f"成功等待 {timeout_ms} 毫秒"}
+        else:
+            self.page.wait_for_load_state("domcontentloaded")
+            return {"success": True, "message": "成功等待页面加载"}
+
+    def _execute_screenshot(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        screenshot_bytes = self.page.screenshot()
+        screenshot_base64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+        return {
+            "success": True,
+            "message": "成功截取屏幕截图",
+            "screenshot": screenshot_base64
+        }
+
+    def _execute_extract(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if "selector" in step:
+            content = self.page.locator(step["selector"]).inner_text()
+            return {"success": True, "message": "成功提取内容", "content": content}
+        else:
+            content = self.page.content()
+            return {"success": True, "message": "成功提取页面内容", "content": content}
+
+    def _execute_scroll(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        if "selector" in step:
+            self.page.locator(step["selector"]).scroll_into_view_if_needed()
+            return {"success": True, "message": f"成功滚动到元素 {step['selector']}"}
+        elif "value" in step:
+            self.page.evaluate(f"window.scrollBy(0, {step['value']})")
+            return {"success": True, "message": f"成功滚动页面 {step['value']} 像素"}
+        else:
+            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            return {"success": True, "message": "成功滚动到页面底部"}
+
+    def _execute_back(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        self.page.go_back()
+        return {"success": True, "message": "成功返回上一页"}
+
+    def _execute_forward(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        self.page.go_forward()
+        return {"success": True, "message": "成功前进到下一页"}
+
+    def _execute_refresh(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        self.page.reload()
+        return {"success": True, "message": "成功刷新页面"}
+
+    def _execute_close(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        self.page.close()
+        return {"success": True, "message": "成功关闭页面"}
+
+    def _execute_error(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        error_message = step.get("error", "未知错误")
+        return {"success": False, "message": "执行错误指令", "error": error_message}

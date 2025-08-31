@@ -18,9 +18,9 @@ sys.path.append(str(project_root))
 from examples.aria_snapshot_usage import ARIASnapshotExamples
 
 
-def debug_jd_search_elements():
-    """Debug finding search-related elements on JD.com"""
-    print("🔍 Debugging JD.com search elements")
+def debug_local_search_elements():
+    """Debug finding search-related elements on the local test page"""
+    print("🔍 Debugging local search elements")
     print("="*50)
     
     examples = ARIASnapshotExamples()
@@ -28,8 +28,11 @@ def debug_jd_search_elements():
     try:
         examples.setup()
         
+        # Define the path to the local HTML file
+        local_page_path = project_root / "tests" / "fixtures" / "sample_pages" / "search_page.html"
+        
         # Find search-related elements
-        search_elements = examples.find_elements_by_role("https://www.jd.com", "textbox")
+        search_elements = examples.find_elements_by_role(str(local_page_path), "textbox")
         
         print(f"Found {len(search_elements)} textbox elements:")
         for elem in search_elements:
@@ -39,17 +42,17 @@ def debug_jd_search_elements():
             print()
         
         # Try to create a selector for the search box
-        print("Creating selector for search box...")
-        selector = examples.create_selector_from_aria("https://www.jd.com", "搜索")
+        print("Creating selector for search button...")
+        selector = examples.create_selector_from_aria(str(local_page_path), "搜索")
         print(f"Generated selector: {selector}")
         
     finally:
         examples.cleanup()
 
 
-def debug_jd_buttons():
-    """Debug finding buttons on JD.com"""
-    print("🔍 Debugging JD.com buttons")
+def debug_local_buttons():
+    """Debug finding buttons on the local test page"""
+    print("🔍 Debugging local buttons")
     print("="*50)
     
     examples = ARIASnapshotExamples()
@@ -57,8 +60,11 @@ def debug_jd_buttons():
     try:
         examples.setup()
         
+        # Define the path to the local HTML file
+        local_page_path = project_root / "tests" / "fixtures" / "sample_pages" / "search_page.html"
+        
         # Find all buttons
-        buttons = examples.find_elements_by_role("https://www.jd.com", "button")
+        buttons = examples.find_elements_by_role(str(local_page_path), "button")
         
         print(f"Found {len(buttons)} button elements:")
         for i, button in enumerate(buttons):
@@ -70,9 +76,9 @@ def debug_jd_buttons():
         examples.cleanup()
 
 
-def debug_jd_full_snapshot():
-    """Debug getting full ARIA snapshot of JD.com"""
-    print("🔍 Debugging JD.com full ARIA snapshot")
+def debug_local_full_snapshot():
+    """Debug getting full ARIA snapshot of the local test page"""
+    print("🔍 Debugging local full snapshot")
     print("="*50)
     
     examples = ARIASnapshotExamples()
@@ -80,8 +86,11 @@ def debug_jd_full_snapshot():
     try:
         examples.setup()
         
+        # Define the path to the local HTML file
+        local_page_path = project_root / "tests" / "fixtures" / "sample_pages" / "search_page.html"
+        
         # Get basic snapshot info (truncated for readability)
-        snapshot = examples.basic_aria_snapshot("https://www.jd.com")
+        snapshot = examples.basic_aria_snapshot(str(local_page_path))
         
         print(f"Root role: {snapshot.get('role')}")
         print(f"Page name: {snapshot.get('name')}")
@@ -101,7 +110,7 @@ def debug_jd_full_snapshot():
         # Save snapshot to file for detailed analysis
         import json
         import time
-        filename = f"jd_debug_{int(time.time())}.json"
+        filename = f"local_debug_{int(time.time())}.json"
         with open(filename, 'w', encoding='utf-8') as f:
             json.dump(snapshot, f, indent=2, ensure_ascii=False)
         print(f"\n💾 Full snapshot saved to: {filename}")
@@ -190,11 +199,11 @@ if __name__ == "__main__":
         command = sys.argv[1].lower()
         
         if command == "search":
-            debug_jd_search_elements()
+            debug_local_search_elements()
         elif command == "buttons":
-            debug_jd_buttons()
+            debug_local_buttons()
         elif command == "full":
-            debug_jd_full_snapshot()
+            debug_local_full_snapshot()
         elif command == "site" and len(sys.argv) > 2:
             debug_specific_website(sys.argv[2])
         else:
@@ -214,11 +223,11 @@ if __name__ == "__main__":
         choice = input("Enter choice (1-4): ").strip()
         
         if choice == "1":
-            debug_jd_search_elements()
+            debug_local_search_elements()
         elif choice == "2":
-            debug_jd_buttons()
+            debug_local_buttons()
         elif choice == "3":
-            debug_jd_full_snapshot()
+            debug_local_full_snapshot()
         elif choice == "4":
             url = input("Enter website URL: ").strip()
             if not url.startswith(('http://', 'https://')):

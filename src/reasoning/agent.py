@@ -10,6 +10,8 @@
 import base64
 import json
 import time
+import threading
+from queue import Queue, Empty
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 
@@ -25,11 +27,21 @@ from src.action.error_handler import ErrorHandler
 
 
 class BrowserAgent:
-    """浏览器代理类，协调各层组件执行用户指令"""
+    """
+    浏览器代理类，协调各层组件执行用户指令。
+    此类是线程安全的，通过专用的Playwright线程处理所有浏览器交互。
+    """
     
     def __init__(self):
         """初始化浏览器代理"""
         self.logger = get_logger()
+        self.initialized = False
+        self._lock = threading.Lock()
+        self._playwright_thread: Optional[threading.Thread] = None
+        self._command_queue: Queue = Queue()
+        self._result_queue: Queue = Queue()
+
+        # 这些属性将在专用的Playwright线程中被初始化和使用
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
@@ -39,131 +51,136 @@ class BrowserAgent:
         self.action_executor: Optional[ActionExecutor] = None
         self.state_manager: Optional[StateManager] = None
         self.error_handler: Optional[ErrorHandler] = None
-        self.initialized = False
-    
+
     def initialize(self):
-        """初始化浏览器和各层组件"""
-        if self.initialized:
-            return
-        
+        """
+        初始化浏览器代理，启动专用的Playwright线程。
+        这个方法是线程安全的。
+        """
+        with self._lock:
+            if self.initialized:
+                return
+            
+            self._playwright_thread = threading.Thread(target=self._playwright_thread_loop, daemon=True)
+            self._playwright_thread.start()
+            
+            # 等待线程初始化完成
+            result = self._result_queue.get()
+            if result.get("success"):
+                self.initialized = True
+                self.logger.info("浏览器代理初始化完成")
+            else:
+                error = result.get("error", "未知错误")
+                self.logger.error(f"初始化浏览器代理时发生错误: {error}")
+                raise RuntimeError(f"Failed to initialize BrowserAgent: {error}")
+
+    def _playwright_thread_loop(self):
+        """
+        专用于Playwright操作的线程主循环。
+        负责初始化浏览器和处理指令队列中的任务。
+        """
         try:
-            # 获取配置
+            # 1. 初始化Playwright和浏览器组件
             browser_type = get_config("BROWSER_TYPE", "chromium")
             headless = get_config("HEADLESS", False)
             user_data_dir = get_config("USER_DATA_DIR", "./browser_data")
-            
-            # 确保用户数据目录存在
             Path(user_data_dir).mkdir(parents=True, exist_ok=True)
             
-            # 启动浏览器
             self.logger.info(f"启动{browser_type}浏览器，headless={headless}")
             self.playwright = sync_playwright().start()
             browser_instance = getattr(self.playwright, browser_type)
             
-            # 创建持久化的浏览器上下文
             self.browser = browser_instance.launch(headless=headless)
             self.context = self.browser.new_context(user_agent="AI Browser Agent/1.0")
             self.page = self.context.new_page()
             
-            # 初始化各层组件
             self.page_analyzer = PageAnalyzer(self.page)
             self.instruction_builder = InstructionBuilder()
             self.state_manager = StateManager()
             self.error_handler = ErrorHandler()
-            self.action_executor = ActionExecutor(self.page, state_manager=self.state_manager, error_handler=self.error_handler)
+            self.action_executor = ActionExecutor(self.page, self.state_manager, self.error_handler)
             
-            self.initialized = True
-            self.logger.info("浏览器代理初始化完成")
+            # 通知主线程初始化成功
+            self._result_queue.put({"success": True})
         except Exception as e:
-            self.logger.error(f"初始化浏览器代理时发生错误: {str(e)}")
-            self.cleanup()
-            raise
+            self.logger.error(f"Playwright线程初始化失败: {e}", exc_info=True)
+            self._result_queue.put({"success": False, "error": str(e)})
+            return
 
-    def _is_navigation_only(self, instruction: Dict[str, Any]) -> bool:
-        """判断指令是否仅包含导航/等待步骤（保留用于向后兼容）"""
-        try:
-            if not instruction:
-                return False
-            if instruction.get("action") == "navigate":
-                return True
-            steps = instruction.get("steps")
-            if not isinstance(steps, list):
-                return False
-            allowed = {"navigate", "wait"}
-            has_nav = False
-            for step in steps:
-                action = step.get("action")
-                if action == "navigate":
-                    has_nav = True
-                if action not in allowed:
-                    return False
-            return has_nav
-        except Exception:
-            return False
-    
-    def execute(self, text: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
-        """执行用户自然语言文本
+        # 2. 开始处理指令循环
+        while True:
+            try:
+                task = self._command_queue.get()
+                if task is None:  # 哨兵值，表示退出
+                    self.logger.info("Playwright线程收到退出信号")
+                    break
+
+                command = task["command"]
+                args = task.get("args", [])
+                kwargs = task.get("kwargs", {})
+                
+                # 根据指令调用相应的方法
+                handler = getattr(self, f"_handle_{command}", None)
+                if handler:
+                    result = handler(*args, **kwargs)
+                    self._result_queue.put(result)
+                else:
+                    self._result_queue.put({"success": False, "error": f"未知指令: {command}"})
+            except Exception as e:
+                self.logger.error(f"Playwright线程在处理任务时出错: {e}", exc_info=True)
+                self._result_queue.put({"success": False, "error": str(e)})
         
-        Args:
-            text: 用户输入的自然语言文本（例如："在bing网站检索北京秋天"）
-            session_state: 会话状态，用于保存多轮对话的上下文
-            
-        Returns:
-            Dict[str, Any]: 执行结果，包含success、message、error等字段
-            
-        注意：
-            - text参数是用户输入的自然语言文本
-            - 系统内部会将text转换为executable JSON instruction进行执行
-            - instruction特指系统内部使用的JSON格式可执行指令
-            - 优化版本：使用单次LLM调用生成完整多步指令
+        # 3. 循环结束后清理资源
+        self._cleanup_resources()
+        self.logger.info("Playwright线程已清理并退出")
+
+    def execute(self, text: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        将执行自然语言文本的任务发送到Playwright线程并等待结果。
         """
         if not self.initialized:
             self.initialize()
         
+        self._command_queue.put({
+            "command": "execute",
+            "kwargs": {"text": text, "session_state": session_state}
+        })
+        return self._result_queue.get()
+
+    def _handle_execute(self, text: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
+        """在Playwright线程内部实际执行任务"""
         try:
             self.logger.info(f"执行自然语言文本: {text}")
             
-            # 智能页面分析（容错）
             page_data = {}
             try:
                 analyzed = self.page_analyzer.analyze()
-                page_data = analyzed if (isinstance(analyzed, dict) and analyzed.get("is_valid", True)) else {}
+                page_data = analyzed if isinstance(analyzed, dict) and analyzed.get("is_valid", True) else {}
             except Exception as analyze_err:
-                self.logger.warning(f"页面分析失败，使用空page_data: {analyze_err}")
-                page_data = {}
-            
-            # 单次智能指令构建（优化：生成完整多步指令避免二次LLM调用）
+                self.logger.warning(f"页面分析失败: {analyze_err}")
+
             try:
-                json_instruction = self.instruction_builder.build_optimized(
-                    text,
-                    page_data,
-                    session_state
-                )
+                json_instruction = self.instruction_builder.build_optimized(text, page_data, session_state)
             except Exception as build_err:
                 self.logger.error(f"构建指令失败: {build_err}")
                 json_instruction = {"action": "error", "error": str(build_err)}
             
-            # 执行完整指令（可能包含多个步骤）
             result = self.action_executor.execute(
                 json_instruction,
                 session_state,
-                timeout=get_config("MAX_EXECUTION_TIME", 120)  # 增加超时时间以支持多步操作
+                timeout=get_config("MAX_EXECUTION_TIME", 120)
             )
             
-            # 截图（可选）
             screenshot = result.get("screenshot")
-            if not screenshot:
+            if not screenshot and result.get("success", False) and result.get("take_screenshot", False):
                 try:
-                    if result.get("success", False) and result.get("take_screenshot", False):
-                        screenshot_bytes = self.page.screenshot()
-                        screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
+                    screenshot_bytes = self.page.screenshot()
+                    screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
                 except Exception:
                     screenshot = None
             
-            # 执行后重新感知（容错）
             try:
-                updated = self.page_analyzer.analyze()
-                updated_page_data = updated if (isinstance(updated, dict) and updated.get("is_valid", True)) else {}
+                updated_page_data = self.page_analyzer.analyze()
             except Exception:
                 updated_page_data = {}
 
@@ -177,15 +194,49 @@ class BrowserAgent:
                 "page_data": updated_page_data
             }
         except Exception as e:
-            self.logger.error(f"执行指令时发生错误: {str(e)}")
-            return {
-                "success": False,
-                "message": "执行失败",
-                "error": str(e),
-                "session_state": session_state
-            }
+            self.logger.error(f"执行指令时发生错误: {e}", exc_info=True)
+            return {"success": False, "message": "执行失败", "error": str(e), "session_state": session_state}
 
-    # ---- 跨层接口封装 ----
+    def cleanup(self):
+        """清理资源，并向Playwright线程发送退出信号"""
+        with self._lock:
+            if not self.initialized or not self._playwright_thread:
+                return
+            
+            self.logger.info("开始清理浏览器代理资源")
+            try:
+                # 发送退出信号
+                self._command_queue.put(None)
+                # 等待线程结束
+                self._playwright_thread.join(timeout=10)
+                if self._playwright_thread.is_alive():
+                    self.logger.warning("Playwright线程在超时后仍未结束")
+            except Exception as e:
+                self.logger.error(f"清理过程中发生错误: {e}")
+            finally:
+                self._playwright_thread = None
+                self.initialized = False
+                self.logger.info("浏览器代理资源已清理")
+
+    def _cleanup_resources(self):
+        """在Playwright线程内部安全地关闭所有资源"""
+        self.logger.info("开始关闭Playwright资源")
+        resources = [self.page, self.context, self.browser]
+        for resource in resources:
+            if resource:
+                try:
+                    resource.close()
+                except Exception as e:
+                    self.logger.warning(f"关闭资源 {type(resource).__name__} 时出错: {e}")
+        if self.playwright:
+            try:
+                self.playwright.stop()
+            except Exception as e:
+                self.logger.warning(f"停止Playwright时出错: {e}")
+        self.logger.info("Playwright资源已关闭")
+
+    # ---- 跨层接口封装 (通过队列与Playwright线程通信) ----
+    
     def close(self) -> None:
         """关闭浏览器代理（与cleanup等价）"""
         self.cleanup()
@@ -195,59 +246,35 @@ class BrowserAgent:
         return self.execute(instruction, session_state or {})
 
     def get_page_state(self) -> Dict[str, Any]:
-        """获取当前页面状态（意图图谱/摘要）"""
-        if not self.initialized:
-            self.initialize()
-        try:
-            analyzed = self.page_analyzer.analyze()
-            return analyzed if (isinstance(analyzed, dict) and analyzed.get("is_valid", True)) else {}
-        except Exception:
-            return {}
+        """获取当前页面状态"""
+        if not self.initialized: self.initialize()
+        self._command_queue.put({"command": "get_page_state"})
+        return self._result_queue.get()
 
-    def take_screenshot(self) -> bytes:
+    def _handle_get_page_state(self) -> Dict[str, Any]:
+        try:
+            return self.page_analyzer.analyze()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def take_screenshot(self) -> Optional[bytes]:
         """截取当前页面截图"""
-        if not self.initialized:
-            self.initialize()
-        return self.page.screenshot()
+        if not self.initialized: self.initialize()
+        self._command_queue.put({"command": "take_screenshot"})
+        result = self._result_queue.get()
+        return result if isinstance(result, bytes) else None
+
+    def _handle_take_screenshot(self) -> Optional[bytes]:
+        try:
+            return self.page.screenshot()
+        except Exception:
+            return None
 
     def get_supported_actions(self) -> List[str]:
-        if not self.initialized:
-            self.initialize()
+        if not self.initialized: self.initialize()
+        # 这个方法不与Playwright直接交互，可以安全调用
+        # 但为了保持一致性，我们也可以通过队列
+        if not self.action_executor:
+             # 如果线程还没初始化好，返回一个空列表或默认值
+            return []
         return self.action_executor.get_supported_actions()
-    
-    def cleanup(self):
-        """清理资源"""
-        self.logger.info("清理浏览器代理资源")
-        
-        # 关闭浏览器
-        if self.page:
-            try:
-                self.page.close()
-            except:
-                pass
-            self.page = None
-        
-        if self.context:
-            try:
-                self.context.close()
-            except:
-                pass
-            self.context = None
-        
-        if self.browser:
-            try:
-                self.browser.close()
-            except:
-                pass
-            self.browser = None
-        
-        if self.playwright:
-            try:
-                self.playwright.stop()
-            except:
-                pass
-            self.playwright = None
-        
-        # 重置状态
-        self.initialized = False
-        self.logger.info("浏览器代理资源已清理")

@@ -7,6 +7,8 @@ for web automation and accessibility testing.
 """
 
 import json
+import os
+from pathlib import Path
 from typing import Dict, Any, List, Optional
 from playwright.sync_api import sync_playwright, Page, Browser, BrowserContext
 
@@ -53,6 +55,20 @@ class ARIASnapshotExamples:
                 self.playwright.stop()
             except Exception as e:
                 print(f"⚠️  Error stopping Playwright: {e}")
+
+    def navigate_to_page(self, url: str, timeout: int = 60000):
+        """Navigate to a local file or remote URL"""
+        if os.path.exists(url):
+            # Local file
+            abs_path = Path(url).resolve()
+            page_url = abs_path.as_uri()
+            print(f"Navigating to local file: {page_url}")
+        else:
+            # Remote URL
+            page_url = url
+            print(f"Navigating to remote URL: {page_url}")
+
+        self.page.goto(page_url, timeout=timeout)
     
     def basic_aria_snapshot(self, url: str, timeout: int = 60000) -> Dict[str, Any]:
         """
@@ -65,8 +81,7 @@ class ARIASnapshotExamples:
         Returns:
             Dict containing the ARIA snapshot
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -95,8 +110,7 @@ class ARIASnapshotExamples:
         Returns:
             Filtered ARIA snapshot
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -128,8 +142,7 @@ class ARIASnapshotExamples:
         Returns:
             ARIA snapshot of the specific element
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -160,8 +173,7 @@ class ARIASnapshotExamples:
         Returns:
             List of interactive elements found
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -220,8 +232,7 @@ class ARIASnapshotExamples:
         Returns:
             List of elements with the target role
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -273,8 +284,7 @@ class ARIASnapshotExamples:
         Returns:
             A selector string that can be used with Playwright
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
@@ -340,8 +350,7 @@ class ARIASnapshotExamples:
         Returns:
             Form structure information
         """
-        print(f"Navigating to {url}")
-        self.page.goto(url, timeout=timeout)
+        self.navigate_to_page(url, timeout=timeout)
         
         # First wait for DOM to load
         self.page.wait_for_load_state("domcontentloaded")
