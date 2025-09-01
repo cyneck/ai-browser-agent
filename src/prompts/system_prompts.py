@@ -113,6 +113,13 @@ class SystemPrompts:
         - 生成的指令应能一次性完成用户的完整需求
         - **搜索完成后应使用 extract_results 提取结果，而不是 close 关闭页面**
         - **避免在查询操作后自动关闭浏览器，用户可能需要查看结果**
+        - **根据用户意图确定提取策略：概况信息用auto，结构化数据用structured，完整内容用full_content**
+        
+        **提取策略选择**：
+        - 用户问"今日天气怎么样"等概况问题 → extraction_type: "auto" 
+        - 用户要求"表格数据"、"列表"等 → extraction_type: "structured"
+        - 用户要求"整个页面"、"完整内容" → extraction_type: "full_content"
+        - 不确定时使用 → extraction_type: "auto"
         
         输出格式：严格按照JSON格式，优先使用多步骤指令：
         ```json

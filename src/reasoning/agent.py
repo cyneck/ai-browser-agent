@@ -21,6 +21,8 @@ from src.common.config import get_config, get_human_behavior_config
 from src.common.logger import get_logger
 from src.perception.page_analyzer import PageAnalyzer
 from src.reasoning.instruction_builder import InstructionBuilder
+from src.reasoning.intent_classifier import IntentClassifier
+from src.reasoning.response_generator import ResponseGenerator
 from src.action.executor import ActionExecutor
 from src.action.state_manager import StateManager
 from src.action.error_handler import ErrorHandler
@@ -96,6 +98,8 @@ class BrowserAgent:
             
             self.page_analyzer = PageAnalyzer(self.page)
             self.instruction_builder = InstructionBuilder()
+            self.intent_classifier = IntentClassifier()
+            self.response_generator = ResponseGenerator()
             self.state_manager = StateManager()
             self.error_handler = ErrorHandler()
             
@@ -160,6 +164,11 @@ class BrowserAgent:
         try:
             self.logger.info(f"执行自然语言文本: {text}")
             
+            # 1. 分析用户意图
+            intent_result = self.intent_classifier.classify_intent(text)
+            self.logger.info(f"识别用户意图: {intent_result.intent_type.value}, 置信度: {intent_result.confidence}")
+            
+            # 2. 获取页面数据
             page_data = {}
             try:
                 analyzed = self.page_analyzer.analyze()
@@ -167,43 +176,175 @@ class BrowserAgent:
             except Exception as analyze_err:
                 self.logger.warning(f"页面分析失败: {analyze_err}")
 
+            # 3. 构建指令（考虑用户意图）
             try:
                 json_instruction = self.instruction_builder.build_optimized(text, page_data, session_state)
+                
+                # 根据用户意图调整指令
+                json_instruction = self._enhance_instruction_with_intent(json_instruction, intent_result)
+                
             except Exception as build_err:
                 self.logger.error(f"构建指令失败: {build_err}")
                 json_instruction = {"action": "error", "error": str(build_err)}
             
+            # 4. 执行指令
             result = self.action_executor.execute(
                 json_instruction,
                 session_state,
                 timeout=get_config("MAX_EXECUTION_TIME", 120)
             )
             
-            screenshot = result.get("screenshot")
-            if not screenshot and result.get("success", False) and result.get("take_screenshot", False):
+            # 5. 处理执行结果并生成最终响应
+            final_response = self._process_execution_result(
+                result, intent_result, text, session_state
+            )
+            
+            # 6. 处理截图
+            screenshot = final_response.get("screenshot")
+            if not screenshot and final_response.get("success", False) and final_response.get("take_screenshot", False):
                 try:
                     screenshot_bytes = self.page.screenshot()
                     screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
                 except Exception:
                     screenshot = None
             
+            # 7. 更新页面数据
             try:
                 updated_page_data = self.page_analyzer.analyze()
             except Exception:
                 updated_page_data = {}
 
-            self.logger.info(f"执行完成，成功: {result.get('success', False)}")
+            self.logger.info(f"执行完成，成功: {final_response.get('success', False)}")
             return {
-                "success": result.get("success", False),
-                "message": result.get("message", "执行完成"),
-                "error": result.get("error"),
+                "success": final_response.get("success", False),
+                "message": final_response.get("message", "执行完成"),
+                "error": final_response.get("error"),
                 "screenshot": screenshot,
                 "session_state": session_state,
-                "page_data": updated_page_data
+                "page_data": updated_page_data,
+                "content": final_response.get("content"),  # 添加内容字段
+                "response_format": final_response.get("response_format", "natural_language"),  # 添加格式字段
+                "intent_info": {  # 添加意图信息
+                    "intent_type": intent_result.intent_type.value,
+                    "confidence": intent_result.confidence,
+                    "response_format": intent_result.response_format
+                }
             }
         except Exception as e:
             self.logger.error(f"执行指令时发生错误: {e}", exc_info=True)
             return {"success": False, "message": "执行失败", "error": str(e), "session_state": session_state}
+    
+    def _enhance_instruction_with_intent(self, instruction: Dict[str, Any], 
+                                       intent_result) -> Dict[str, Any]:
+        """根据用户意图增强指令"""
+        from src.reasoning.intent_classifier import IntentType
+        
+        # 如果是多步骤指令，检查是否需要添加特定的提取步骤
+        if "steps" in instruction:
+            steps = instruction["steps"]
+            
+            # 如果是信息获取类意图，确保有提取步骤
+            if intent_result.intent_type in [IntentType.SUMMARY_INFO, IntentType.DETAILED_INFO, IntentType.STRUCTURED_DATA]:
+                # 检查是否已经有提取动作
+                has_extract = any(step.get("action") in ["extract_results", "extract"] for step in steps)
+                
+                if not has_extract:
+                    # 添加适当的提取动作
+                    extract_step = self._create_extract_step_for_intent(intent_result)
+                    steps.append(extract_step)
+            
+            # 如果是全页面内容意图，确保使用全页面提取
+            elif intent_result.intent_type == IntentType.FULL_PAGE_CONTENT:
+                # 添加全页面内容提取
+                steps.append({
+                    "action": "extract_results",
+                    "extraction_type": "full_content",
+                    "description": "提取完整页面内容"
+                })
+        
+        else:
+            # 单步骤指令，根据意图调整
+            if intent_result.intent_type == IntentType.FULL_PAGE_CONTENT and instruction.get("action") != "extract_results":
+                # 转换为全页面内容提取
+                instruction = {
+                    "action": "extract_results",
+                    "extraction_type": "full_content",
+                    "description": "提取完整页面内容"
+                }
+        
+        return instruction
+    
+    def _create_extract_step_for_intent(self, intent_result) -> Dict[str, Any]:
+        """根据意图创建适当的提取步骤"""
+        from src.reasoning.intent_classifier import IntentType
+        
+        if intent_result.intent_type == IntentType.STRUCTURED_DATA:
+            return {
+                "action": "extract_results",
+                "extraction_type": "structured",
+                "description": "提取结构化数据"
+            }
+        elif intent_result.intent_type == IntentType.DETAILED_INFO:
+            return {
+                "action": "extract_results",
+                "extraction_type": "auto",
+                "description": "提取详细信息"
+            }
+        else:  # SUMMARY_INFO or default
+            return {
+                "action": "extract_results",
+                "extraction_type": "auto",
+                "description": "提取相关信息"
+            }
+    
+    def _process_execution_result(self, result: Dict[str, Any], intent_result, 
+                                 original_text: str, session_state: Dict[str, Any]) -> Dict[str, Any]:
+        """处理执行结果并生成最终响应"""
+        # 如果执行失败，直接返回
+        if not result.get("success", False):
+            return result
+        
+        # 获取提取的内容
+        extracted_content = result.get("content")
+        
+        # 如果没有提取到内容，检查步骤结果
+        if not extracted_content and "step_results" in result:
+            for step_result in result["step_results"]:
+                if step_result.get("content"):
+                    extracted_content = step_result["content"]
+                    break
+        
+        # 如果仍然没有内容，返回原始结果
+        if not extracted_content:
+            return result
+        
+        # 使用响应生成器生成最终响应
+        try:
+            generated_response = self.response_generator.generate_response(
+                extracted_content, intent_result, {
+                    "original_text": original_text,
+                    "page_url": getattr(self.page, 'url', ''),
+                    "session_state": session_state
+                }
+            )
+            
+            if generated_response.success:
+                # 更新结果
+                result["message"] = generated_response.content
+                result["content"] = extracted_content  # 保留原始内容
+                result["response_format"] = generated_response.format
+                result["metadata"] = generated_response.metadata
+            else:
+                # 生成失败，使用默认处理
+                result["message"] = generated_response.content or result.get("message", "执行完成")
+                result["content"] = extracted_content
+            
+        except Exception as e:
+            self.logger.error(f"生成响应时出错: {e}")
+            # 发生错误时，保持原始结果
+            result["content"] = extracted_content
+        
+        return result
 
     def cleanup(self):
         """清理资源，并向Playwright线程发送退出信号"""

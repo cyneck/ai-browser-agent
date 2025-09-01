@@ -25,9 +25,11 @@ class BaiduPlugin(BaseWebsitePlugin):
     def build_search_action(self, query: str) -> Optional[List[Dict[str, Any]]]:
         """
         为 Baidu 网站构建搜索动作的步骤列表。
+        支持多种搜索框选择器，使用 Enter 键执行搜索。
         """
         return [
-            {"action": "wait", "selector": "#chat-textarea", "timeout": 5000, "description": "等待百度搜索框出现"},
-            {"action": "fill", "selector": "#chat-textarea", "value": query, "description": f"在百度搜索框输入 '{query}'"},
-            {"action": "click", "selector": "#chat-submit-button", "description": "点击百度搜索按钮"}
+            {"action": "wait", "selector": "#kw, input[name='wd'], #chat-textarea", "timeout": 5000, "description": "等待百度搜索框出现"},
+            {"action": "fill", "selector": "#kw, input[name='wd'], #chat-textarea", "value": query, "description": f"在百度搜索框输入 '{query}'"},
+            {"action": "key", "selector": "#kw, input[name='wd'], #chat-textarea", "value": "Enter", "description": "按回车键执行搜索"},
+            {"action": "wait", "value": 3000, "description": "等待搜索结果加载"}
         ]

@@ -10,7 +10,7 @@
 import json
 import time
 import base64
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional, Callable, Union
 
 from playwright.sync_api import Page, Error as PlaywrightError
 
@@ -49,6 +49,7 @@ class ActionExecutor:
             "click": self._execute_click,
             "fill": self._execute_fill,
             "type": self._execute_fill,  # 'type' is an alias for 'fill'
+            "key": self._execute_key,  # Add keyboard action support
             "select": self._execute_select,
             "wait": self._execute_wait,
             "screenshot": self._execute_screenshot,
@@ -326,6 +327,27 @@ class ActionExecutor:
             
         return {"success": True, "message": f"成功在 {selector} 中输入文本"}
 
+    def _execute_key(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行键盘按键操作"""
+        selector = step.get("selector")
+        key = step.get("value") or step.get("key")
+        
+        if not key:
+            return {"success": False, "message": "按键失败：按键值为空"}
+            
+        try:
+            if selector:
+                # 先聚焦到元素，然后按键
+                self.page.locator(selector).focus()
+                self.page.keyboard.press(key)
+                return {"success": True, "message": f"成功在 {selector} 上按下 {key} 键"}
+            else:
+                # 直接按键
+                self.page.keyboard.press(key)
+                return {"success": True, "message": f"成功按下 {key} 键"}
+        except Exception as e:
+            return {"success": False, "message": f"按键失败: {str(e)}"}
+
     def _execute_select(self, step: Dict[str, Any]) -> Dict[str, Any]:
         selector = step.get("selector")
         value = step.get("value")
@@ -365,26 +387,41 @@ class ActionExecutor:
             return {"success": True, "message": "成功提取页面内容", "content": content}
             
     def _execute_extract_results(self, step: Dict[str, Any]) -> Dict[str, Any]:
-        """专门用于提取搜索结果的动作"""
+        """智能提取结果的动作，支持多种提取策略"""
         try:
-            search_results = self._extract_search_results()
-            if search_results:
+            # 获取提取策略参数
+            extraction_type = step.get("extraction_type", "auto")  # auto, search_results, full_content, structured
+            target_selector = step.get("target_selector")  # 可选的特定选择器
+            
+            # 根据策略提取不同类型的内容
+            if extraction_type == "full_content":
+                extracted_content = self._extract_full_page_content()
+            elif extraction_type == "structured":
+                extracted_content = self._extract_structured_data(target_selector)
+            elif extraction_type == "search_results" or self._is_search_results_page():
+                extracted_content = self._extract_search_results()
+            else:
+                # Auto-detect appropriate extraction method
+                extracted_content = self._auto_extract_content()
+            
+            if extracted_content:
                 return {
                     "success": True, 
-                    "message": f"成功提取 {len(search_results)} 条搜索结果",
-                    "content": search_results,
-                    "search_results": search_results  # 保持向后兼容
+                    "message": f"成功提取内容",
+                    "content": extracted_content,
+                    "extraction_type": extraction_type,
+                    "search_results": extracted_content if isinstance(extracted_content, list) else None  # 保持向后兼容
                 }
             else:
                 return {
                     "success": False, 
-                    "message": "未找到搜索结果",
-                    "content": []
+                    "message": "未找到可提取的内容",
+                    "content": None
                 }
         except Exception as e:
             return {
                 "success": False, 
-                "message": f"提取搜索结果时出错: {str(e)}",
+                "message": f"提取内容时出错: {str(e)}",
                 "error": str(e)
             }
 
@@ -564,6 +601,159 @@ class ActionExecutor:
             self.logger.error(f"提取搜索结果时出错: {e}")
             
         return results
+    
+    def _is_search_results_page(self) -> bool:
+        """判断当前是否为搜索结果页面"""
+        current_url = self.page.url.lower()
+        search_indicators = [
+            "search", "s?", "query", "q=", 
+            "baidu.com/s", "google.com/search", "bing.com/search"
+        ]
+        return any(indicator in current_url for indicator in search_indicators)
+    
+    def _extract_full_page_content(self) -> str:
+        """提取完整的页面HTML内容"""
+        try:
+            return self.page.content()
+        except Exception as e:
+            self.logger.error(f"提取完整页面内容失败: {e}")
+            return ""
+    
+    def _extract_structured_data(self, target_selector: Optional[str] = None) -> List[Dict[str, Any]]:
+        """提取结构化数据（表格、列表等）"""
+        structured_data = []
+        
+        try:
+            if target_selector:
+                # 使用特定选择器
+                elements = self.page.locator(target_selector).all()
+                for element in elements:
+                    try:
+                        text = element.inner_text()
+                        href = element.get_attribute("href") or ""
+                        structured_data.append({
+                            "text": text.strip(),
+                            "href": href,
+                            "type": "custom_selector"
+                        })
+                    except Exception:
+                        continue
+            else:
+                # 自动检测结构化元素
+                
+                # 提取表格数据
+                tables = self.page.locator("table").all()
+                for table in tables:
+                    try:
+                        rows = table.locator("tr").all()
+                        table_data = []
+                        headers = []
+                        
+                        for i, row in enumerate(rows):
+                            cells = row.locator("td, th").all()
+                            row_data = [cell.inner_text().strip() for cell in cells]
+                            
+                            if i == 0 and row.locator("th").count() > 0:
+                                headers = row_data
+                            else:
+                                if headers:
+                                    cell_dict = dict(zip(headers, row_data))
+                                else:
+                                    cell_dict = {f"column_{j+1}": cell for j, cell in enumerate(row_data)}
+                                table_data.append(cell_dict)
+                        
+                        if table_data:
+                            structured_data.extend(table_data)
+                    except Exception:
+                        continue
+                
+                # 提取列表数据
+                lists = self.page.locator("ul, ol").all()
+                for list_elem in lists:
+                    try:
+                        items = list_elem.locator("li").all()
+                        for item in items:
+                            text = item.inner_text().strip()
+                            if text and len(text) > 3:  # 过滤太短的内容
+                                link = item.locator("a").first
+                                href = link.get_attribute("href") if link.count() > 0 else ""
+                                structured_data.append({
+                                    "text": text,
+                                    "href": href,
+                                    "type": "list_item"
+                                })
+                    except Exception:
+                        continue
+                
+                # 提取卡片式内容
+                cards = self.page.locator(".card, .item, .post, .article, .entry").all()
+                for card in cards:
+                    try:
+                        title_elem = card.locator("h1, h2, h3, h4, .title, .headline").first
+                        desc_elem = card.locator("p, .description, .summary, .excerpt").first
+                        link_elem = card.locator("a").first
+                        
+                        title = title_elem.inner_text().strip() if title_elem.count() > 0 else ""
+                        description = desc_elem.inner_text().strip() if desc_elem.count() > 0 else ""
+                        href = link_elem.get_attribute("href") if link_elem.count() > 0 else ""
+                        
+                        if title or description:
+                            structured_data.append({
+                                "title": title,
+                                "description": description[:200],  # 限制描述长度
+                                "href": href,
+                                "type": "card"
+                            })
+                    except Exception:
+                        continue
+        
+        except Exception as e:
+            self.logger.error(f"提取结构化数据失败: {e}")
+        
+        return structured_data
+    
+    def _auto_extract_content(self) -> Union[List[Dict[str, Any]], str]:
+        """自动检测并提取适当的内容"""
+        current_url = self.page.url.lower()
+        
+        # 如果是搜索结果页，优先提取搜索结果
+        if self._is_search_results_page():
+            search_results = self._extract_search_results()
+            if search_results:
+                return search_results
+        
+        # 尝试提取结构化数据
+        structured_data = self._extract_structured_data()
+        if structured_data:
+            return structured_data
+        
+        # 如果都没有，返回主要内容区域的文本
+        try:
+            # 尝试获取主要内容区域
+            main_selectors = [
+                "main", "#main", ".main",
+                "article", ".article", "#article",
+                ".content", "#content",
+                ".post", ".entry",
+                "body"
+            ]
+            
+            for selector in main_selectors:
+                try:
+                    element = self.page.locator(selector).first
+                    if element.count() > 0:
+                        text = element.inner_text()
+                        if text and len(text.strip()) > 100:  # 确保有意义的内容
+                            return text.strip()
+                except Exception:
+                    continue
+            
+            # 最后的备选方案
+            return self.page.inner_text("body")
+            
+        except Exception as e:
+            self.logger.error(f"自动提取内容失败: {e}")
+            return ""
         
     def get_behavior_stats(self) -> Dict[str, Any]:
         """获取人类行为模拟统计信息"""

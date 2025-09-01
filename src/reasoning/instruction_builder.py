@@ -71,7 +71,6 @@ class InstructionBuilder:
                 bing_pre_search = self._build_bing_pre_search(user_text)
                 if bing_pre_search:
                     return bing_pre_search
-                    return bing_pre_search
 
             # 在已加载页面上，尝试已知站点的启发式动作（如搜索框操作）
             known = self._maybe_build_known_site_action(user_text, page_data)
@@ -146,15 +145,18 @@ class InstructionBuilder:
             conversation_history = session_state.get("conversation_history", [])
             
             # 先检查简单的预定义操作（无需LLM）
+            self.logger.debug("检查简单启发式规则...")
             simple_action = self._try_simple_heuristics(user_text, page_data)
             if simple_action:
                 self.logger.info("使用简单启发式规则，无需LLM")
                 return simple_action
             
             # 智能上下文分析
+            self.logger.debug("执行智能上下文分析...")
             context_analysis = self._analyze_context(user_text, page_data, conversation_history)
             
             # 构建增强的提示词（一次性生成完整流程）
+            self.logger.debug("构建增强提示词...")
             enhanced_prompt = self.prompt_manager.build_enhanced_prompt(
                 user_text, 
                 page_data, 
@@ -163,9 +165,11 @@ class InstructionBuilder:
             )
             
             # 单次LLM调用生成完整指令
+            self.logger.debug("调用LLM生成指令...")
             json_instruction = self._call_llm(enhanced_prompt)
             
             # 验证指令格式
+            self.logger.debug("验证指令格式...")
             validated_instruction = self._validate_instruction(json_instruction, page_data)
             
             # 更新对话历史
@@ -196,12 +200,17 @@ class InstructionBuilder:
 
     def _try_simple_heuristics(self, user_text: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """尝试简单的启发式规则，避免不必要的LLM调用"""
+        self.logger.debug(f"_try_simple_heuristics: 进入方法，用户输入: {user_text}")
+        
         nav_url = self._detect_navigation_intent_and_url(user_text)
+        self.logger.debug(f"_try_simple_heuristics: 检测到的导航 URL: {nav_url}")
 
         # 使用插件管理器的智能回退功能处理所有网站限制
         if nav_url:
+            self.logger.debug(f"_try_simple_heuristics: 尝试插件管理器回退策略")
             fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
             if fallback_instruction:
+                self.logger.debug(f"_try_simple_heuristics: 插件管理器返回指令")
                 return fallback_instruction
 
         # 如果指令中包含导航URL，并且当前页面无效，则优先处理导航
@@ -236,23 +245,34 @@ class InstructionBuilder:
 
         # 新增逻辑：如果无导航意图，但有搜索意图，且当前页面为空，则默认使用Bing搜索
         if not nav_url and self._intent_is_search(user_text) and (not page_data or not page_data.get("is_valid", True)):
-            bing_search_action = self._build_bing_pre_search(user_text)
-            # _build_bing_pre_search 包含了导航和等待，我们还需要添加后续的fill和click
-            search_on_bing_page = self._maybe_build_known_site_action(user_text, {"url": "https://www.bing.com"})
-            if bing_search_action and search_on_bing_page:
-                # 移除bing_pre_search中的等待，因为后续步骤会等待特定元素
-                bing_search_action["steps"].pop()
-                return {
-                    "steps": bing_search_action["steps"] + search_on_bing_page["steps"],
-                    "description": f"在Bing上搜索: {user_text}"
-                }
-            return bing_search_action
+            self.logger.debug(f"_try_simple_heuristics: 构建优化的 Bing 搜索指令")
+            search_keywords = self._extract_search_keywords(user_text)
+            self.logger.debug(f"_try_simple_heuristics: 提取的搜索关键词: {search_keywords}")
+            
+            # 优化方案：直接导航到Bing首页，然后使用搜索框+回车键
+            optimized_bing_search = {
+                "steps": [
+                    {"action": "navigate", "value": "https://www.bing.com", "description": "导航到Bing首页"},
+                    {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
+                    {"action": "wait", "selector": "input[name='q'], #sb_form_q", "timeout": 5000, "description": "等待Bing搜索框加载"},
+                    {"action": "fill", "selector": "input[name='q'], #sb_form_q", "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
+                    {"action": "key", "selector": "input[name='q'], #sb_form_q", "value": "Enter", "description": "按回车键执行搜索"},
+                    {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
+                    {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
+                ],
+                "description": f"在Bing上搜索: {search_keywords}"
+            }
+            self.logger.debug(f"_try_simple_heuristics: 返回优化的 Bing 搜索指令")
+            return optimized_bing_search
 
         # 如果当前已在某个页面上，则检查是否为已知站点的简单操作
+        self.logger.debug(f"_try_simple_heuristics: 检查已知站点操作")
         simple_action = self._maybe_build_known_site_action(user_text, page_data)
         if simple_action:
+            self.logger.debug(f"_try_simple_heuristics: 返回已知站点操作")
             return simple_action
 
+        self.logger.debug(f"_try_simple_heuristics: 未找到适合的简单启发式规则")
         return None
 
     def _analyze_context(self, user_text: str, page_data: Dict[str, Any], 
@@ -375,7 +395,7 @@ class InstructionBuilder:
         }
 
     def _intent_is_search(self, instruction: str) -> bool:
-        return bool(re.search(r"(搜索|查询|找|news|search)", instruction, re.IGNORECASE))
+        return bool(re.search(r"(搜索|查询|找|新闻|news|search|哪些|什么|怎么样|如何|情况|多少|现在|是什么|怎样)", instruction, re.IGNORECASE))
 
     def _extract_query_from_instruction(self, instruction: str) -> str:
         m = re.search(r"(?:搜索|查询|找)(.+)", instruction)
@@ -388,26 +408,36 @@ class InstructionBuilder:
         try:
             if not self._intent_is_search(user_text):
                 return None
+                
             url = (page_data or {}).get("url") or ""
+            if not url:
+                return None
+                
             host = ""
-            if url:
-                m = re.search(r"://([^/]+)/?", url)
-                if m:
-                    host = m.group(1).lower()
+            m = re.search(r"://([^/]+)/?", url)
+            if m:
+                host = m.group(1).lower()
             if not host:
                 return None
+                
+            self.logger.debug(f"尝试为站点 {host} 构建搜索动作")
+            
             query = self._extract_query_from_instruction(user_text)
-            steps: List[Dict[str, Any]] = []
+            
             # 尝试通过网站插件构建搜索动作
             website_plugin = self.plugin_manager.get_website_plugin(url)
             if website_plugin:
+                self.logger.debug(f"找到网站插件: {website_plugin.__class__.__name__}")
                 steps = website_plugin.build_search_action(query)
                 if steps:
                     return {"steps": steps, "description": f"站内搜索: {query}"}
                 else:
+                    self.logger.debug(f"插件未返回有效步骤")
                     return None
             else:
+                self.logger.debug(f"未找到适合的网站插件")
                 return None
+                
         except Exception as e:
             self.logger.error(f"在已知站点（如百度/Bing/Google）上生成搜索动作的启发式异常: {e}")
             return None
@@ -415,6 +445,8 @@ class InstructionBuilder:
     def _call_llm(self, prompt: str) -> Dict[str, Any]:
         """调用LLM生成指令，带有智能降级策略"""
         import time
+        
+        self.logger.debug("_call_llm: 开始调用 LLM")
         
         if not self.api_key:
             self.logger.warning("GEMINI_API_KEY 未配置，使用内置启发式")
@@ -425,6 +457,7 @@ class InstructionBuilder:
             return self._fallback_instruction_generation(prompt)
             
         try:
+            self.logger.debug("_call_llm: 配置 Gemini API")
             genai.configure(api_key=self.api_key)
             model_name = get_config("GEMINI_MODEL", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
@@ -434,40 +467,77 @@ class InstructionBuilder:
             start_time = time.time()
             prompt_tokens = int(len(prompt.split()) * 1.3)  # 粗略估算token数
             
-            resp = model.generate_content(prompt)
-            text = getattr(resp, "text", "") or ""
+            self.logger.debug("_call_llm: 开始调用 Gemini API")
             
-            response_time = time.time() - start_time
+            # 添加超时控制
+            import threading
+            import queue
             
-            try:
-                blocks = self._extract_code_blocks(text, "json")
-                if blocks:
-                    text = blocks[0]
-                json_instruction = json.loads(text)
-                
-                completion_tokens = int(len(text.split()) * 1.3)
-                perf_monitor.record_llm_call(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    response_time=response_time,
-                    model_name=model_name,
-                    success=True
-                )
-                
-                return json_instruction
-            except Exception as e:
-                perf_monitor.record_llm_call(
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=0,
-                    response_time=time.time() - start_time,
-                    model_name=model_name,
-                    success=False,
-                    error_message=str(e)
-                )
-                self.logger.warning("LLM返回无效JSON，使用启发式降级")
+            result_queue = queue.Queue()
+            error_queue = queue.Queue()
+            
+            def api_call():
+                try:
+                    resp = model.generate_content(prompt)
+                    result_queue.put(resp)
+                except Exception as e:
+                    error_queue.put(e)
+            
+            # 在单独线程中执行 API 调用
+            thread = threading.Thread(target=api_call)
+            thread.daemon = True
+            thread.start()
+            
+            # 等待结果，最多 10 秒
+            thread.join(timeout=10)
+            
+            if thread.is_alive():
+                self.logger.error("_call_llm: Gemini API 调用超时，使用启发式降级")
                 return self._fallback_instruction_generation(prompt)
+            
+            if not error_queue.empty():
+                raise error_queue.get()
+            
+            if not result_queue.empty():
+                resp = result_queue.get()
+                text = getattr(resp, "text", "") or ""
+                response_time = time.time() - start_time
+                
+                self.logger.debug(f"_call_llm: Gemini API 返回成功，耗时 {response_time:.2f}秒")
+                
+                try:
+                    blocks = self._extract_code_blocks(text, "json")
+                    if blocks:
+                        text = blocks[0]
+                    json_instruction = json.loads(text)
+                    
+                    completion_tokens = int(len(text.split()) * 1.3)
+                    perf_monitor.record_llm_call(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        response_time=response_time,
+                        model_name=model_name,
+                        success=True
+                    )
+                    
+                    return json_instruction
+                except Exception as e:
+                    perf_monitor.record_llm_call(
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=0,
+                        response_time=time.time() - start_time,
+                        model_name=model_name,
+                        success=False,
+                        error_message=str(e)
+                    )
+                    self.logger.warning(f"_call_llm: LLM返回无效JSON，使用启发式降级: {e}")
+                    return self._fallback_instruction_generation(prompt)
+            else:
+                self.logger.error("_call_llm: 无法获取 API 响应，使用启发式降级")
+                return self._fallback_instruction_generation(prompt)
+                
         except Exception as e:
-            self.logger.error(f"调用Gemini失败: {e}，使用启发式降级")
+            self.logger.error(f"_call_llm: 调用Gemini失败: {e}，使用启发式降级")
             return self._fallback_instruction_generation(prompt)
     
     def _fallback_instruction_generation(self, prompt: str) -> Dict[str, Any]:

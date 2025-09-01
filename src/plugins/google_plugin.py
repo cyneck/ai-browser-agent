@@ -24,9 +24,11 @@ class GooglePlugin(BaseWebsitePlugin):
     def build_search_action(self, query: str) -> Optional[List[Dict[str, Any]]]:
         """
         为 Google 网站构建搜索动作的步骤列表。
+        使用 Enter 键而不是点击按钮，更符合用户习惯。
         """
         return [
             {"action": "wait", "selector": "textarea[name='q'], input[name='q']", "timeout": 5000, "description": "等待Google搜索框出现"},
             {"action": "fill", "selector": "textarea[name='q'], input[name='q']", "value": query, "description": f"在Google搜索框输入 '{query}'"},
-            {"action": "click", "selector": "input[name='btnK'], input[value='Google 搜索']", "description": "点击Google搜索按钮"}
+            {"action": "key", "selector": "textarea[name='q'], input[name='q']", "value": "Enter", "description": "按回车键执行搜索"},
+            {"action": "wait", "value": 3000, "description": "等待搜索结果加载"}
         ]
