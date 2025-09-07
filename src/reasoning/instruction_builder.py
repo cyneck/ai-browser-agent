@@ -16,6 +16,11 @@ import os
 import re
 from typing import Dict, Any, List, Optional
 
+from src.models.instruction import (
+    Instruction, SingleStepInstruction, MultiStepInstruction, 
+    InstructionContext, ActionType, BaseAction, NavigateAction,
+    ClickAction, FillAction, WaitAction, ExtractAction
+)
 from src.common.config import get_config
 from src.common.logger import get_logger
 from src.common.performance_monitor import get_performance_monitor
@@ -25,7 +30,7 @@ from src.plugins.plugin_manager import PluginManager
 
 
 class InstructionBuilder:
-    """指令构建器类，负责将自然语言文本构建为标准化的JSON格式指令"""
+    """指令构建器类，负责将自然语言文本构建为标准化的指令"""
 
     def __init__(self):
         """初始化指令构建器"""
@@ -33,7 +38,6 @@ class InstructionBuilder:
         self.prompt_manager = PromptManager()
         self.plugin_manager = PluginManager()
         self.llm_manager = get_llm_manager()
-
 
     def build(self, user_text: str, page_data: Dict[str, Any],
               session_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -49,6 +53,13 @@ class InstructionBuilder:
         """
         try:
             self.logger.info(f"构建指令: {user_text}")
+
+            # 创建指令上下文
+            instruction_context = InstructionContext(
+                user_text=user_text,
+                page_data=page_data,
+                session_state=session_state
+            )
 
             # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
             if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
@@ -135,6 +146,13 @@ class InstructionBuilder:
         """
         try:
             self.logger.info(f"优化构建指令: {user_text}")
+            
+            # 创建指令上下文
+            instruction_context = InstructionContext(
+                user_text=user_text,
+                page_data=page_data,
+                session_state=session_state
+            )
             
             # 提取对话历史
             conversation_history = session_state.get("conversation_history", [])
@@ -530,7 +548,7 @@ class InstructionBuilder:
             # 确保llm_provider已定义
             if 'llm_provider' not in locals():
                 llm_provider = "unknown"
-            self.logger.error(f"_call_llm: 调用{llm_provider}失败: {e}，使用启发式降级")
+            self.logger.error(f"_call_llm: 调用{llm_provider}失败: {e}，使用启发式降级") 
             return self._fallback_instruction_generation(prompt)
     
     def _fallback_instruction_generation(self, prompt: str) -> Dict[str, Any]:
@@ -541,6 +559,11 @@ class InstructionBuilder:
             return {"action": "error", "error": "无法解析用户指令"}
             
         user_instruction = user_instruction_match.group(1).strip()
+        
+        # 检查用户指令是否为空
+        if not user_instruction:
+            return {"action": "error", "error": "用户输入为空", "message": "用户输入为空"}
+        
         self.logger.info(f"启发式处理指令: {user_instruction}")
         
         # 搜索意图检测和关键词提取

@@ -223,7 +223,8 @@ class LLMManager:
 
         # Ollama
         ollama_enabled = get_config("OLLAMA_ENABLED", "false")
-        if ollama_enabled:
+        self.logger.info(f"OLLAMA_ENABLED config value: {ollama_enabled}")
+        if ollama_enabled and str(ollama_enabled).lower() == "true":
             try:
                 ollama_base_url = get_config("OLLAMA_BASE_URL", "http://localhost:11434")
                 self.providers["ollama"] = OllamaProvider(ollama_base_url)

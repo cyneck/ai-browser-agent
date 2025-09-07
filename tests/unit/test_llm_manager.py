@@ -17,6 +17,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from src.common.llm_manager import LLMManager, GeminiProvider, OpenAIProvider, OllamaProvider
+from src.common.config import get_config
 
 
 class TestLLMManager(unittest.TestCase):
@@ -65,14 +66,15 @@ class TestLLMManager(unittest.TestCase):
                 "GEMINI_API_KEY": "test-gemini-key",
                 "OPENAI_API_KEY": "",  # 空API密钥，不应初始化
                 "QWEN_API_KEY": "test-qwen-key",
-                "OLLAMA_ENABLED": "false"
+                "OLLAMA_ENABLED": "false"  # 禁用Ollama
             }
             return config_map.get(key, default)
         
         mock_get_config.side_effect = config_side_effect
         
-        # 创建LLM管理器
-        manager = LLMManager()
+        # 创建LLM管理器（需要确保在创建时OLLAMA_ENABLED为false）
+        with patch.dict('os.environ', {'OLLAMA_ENABLED': 'false'}):
+            manager = LLMManager()
         
         # 验证可用提供商
         available = manager.get_available_providers()
@@ -134,37 +136,45 @@ class TestLLMManager(unittest.TestCase):
 class TestGeminiProvider(unittest.TestCase):
     """测试Gemini提供商"""
     
-    @patch('src.common.llm_manager.genai')
-    def test_gemini_call(self, mock_genai):
+    def test_gemini_call(self):
         """测试Gemini调用"""
         # 创建提供商
         provider = GeminiProvider("test-api-key")
+        
+        # 如果genai模块未安装，则跳过测试
+        if provider.genai is None:
+            self.skipTest("Google Generative AI SDK not installed")
         
         # 模拟响应
         mock_response = Mock()
         mock_response.text = '{"action": "navigate", "value": "https://example.com"}'
         mock_model = Mock()
         mock_model.generate_content.return_value = mock_response
-        mock_genai.GenerativeModel.return_value = mock_model
         
-        # 调用提供商
-        result = provider.call_llm("测试提示词", "gemini-pro")
-        
-        # 验证调用
-        mock_genai.configure.assert_called_once_with(api_key="test-api-key")
-        mock_genai.GenerativeModel.assert_called_once_with("gemini-pro")
-        mock_model.generate_content.assert_called_once_with("测试提示词")
-        self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
+        with patch.object(provider.genai, 'configure') as mock_configure, \
+             patch.object(provider.genai, 'GenerativeModel', return_value=mock_model) as mock_generative_model:
+            
+            # 调用提供商
+            result = provider.call_llm("测试提示词", "gemini-pro")
+            
+            # 验证调用
+            mock_configure.assert_called_once_with(api_key="test-api-key")
+            mock_generative_model.assert_called_once_with("gemini-pro")
+            mock_model.generate_content.assert_called_once_with("测试提示词")
+            self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
 
 
 class TestOpenAIProvider(unittest.TestCase):
     """测试OpenAI提供商"""
     
-    @patch('src.common.llm_manager.openai')
-    def test_openai_call(self, mock_openai):
+    def test_openai_call(self):
         """测试OpenAI调用"""
         # 创建提供商
         provider = OpenAIProvider("test-api-key")
+        
+        # 如果openai模块未安装，则跳过测试
+        if provider.openai_module is None:
+            self.skipTest("OpenAI SDK not installed")
         
         # 模拟响应
         mock_choice = Mock()
@@ -173,22 +183,21 @@ class TestOpenAIProvider(unittest.TestCase):
         mock_response.choices = [mock_choice]
         mock_client = Mock()
         mock_client.chat.completions.create.return_value = mock_response
-        mock_openai.OpenAI.return_value = mock_client
         
-        # 调用提供商
-        result = provider.call_llm("测试提示词", "gpt-3.5-turbo")
-        
-        # 验证调用
-        mock_openai.OpenAI.assert_called_once_with(api_key="test-api-key")
-        mock_client.chat.completions.create.assert_called_once()
-        self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
+        with patch.object(provider.openai_module, 'OpenAI', return_value=mock_client) as mock_openai_constructor:
+            # 调用提供商
+            result = provider.call_llm("测试提示词", "gpt-3.5-turbo")
+            
+            # 验证调用
+            mock_openai_constructor.assert_called_once_with(api_key="test-api-key")
+            mock_client.chat.completions.create.assert_called_once()
+            self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
 
 
 class TestOllamaProvider(unittest.TestCase):
     """测试Ollama提供商"""
     
-    @patch('src.common.llm_manager.requests')
-    def test_ollama_call(self, mock_requests):
+    def test_ollama_call(self):
         """测试Ollama调用"""
         # 创建提供商
         provider = OllamaProvider("http://localhost:11434")
@@ -197,14 +206,14 @@ class TestOllamaProvider(unittest.TestCase):
         mock_response = Mock()
         mock_response.json.return_value = {"response": '{"action": "navigate", "value": "https://example.com"}'}
         mock_response.raise_for_status.return_value = None
-        mock_requests.post.return_value = mock_response
         
-        # 调用提供商
-        result = provider.call_llm("测试提示词", "llama2")
-        
-        # 验证调用
-        mock_requests.post.assert_called_once()
-        self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
+        with patch('requests.post', return_value=mock_response) as mock_post:
+            # 调用提供商
+            result = provider.call_llm("测试提示词", "llama2")
+            
+            # 验证调用
+            mock_post.assert_called_once()
+            self.assertEqual(result["text"], '{"action": "navigate", "value": "https://example.com"}')
 
 
 def run_tests():

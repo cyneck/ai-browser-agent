@@ -17,6 +17,8 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from playwright.sync_api import sync_playwright, Browser, BrowserContext, Page
 
+from src.models.response import GeneratedResponse, ResponseContext
+from src.models.instruction import Instruction, SingleStepInstruction, MultiStepInstruction, InstructionContext
 from src.common.config import get_config, get_human_behavior_config
 from src.common.logger import get_logger
 from src.perception.page_analyzer import PageAnalyzer
@@ -100,7 +102,11 @@ class BrowserAgent:
             )
             # 在持久化上下文中，不需要单独的browser对象
             self.browser = None
-            self.page = self.context.new_page()
+            # 确保context不为None再调用new_page方法
+            if self.context is not None:
+                self.page = self.context.new_page()
+            else:
+                raise RuntimeError("Failed to create browser context")
             
             self.page_analyzer = PageAnalyzer(self.page)
             self.instruction_builder = InstructionBuilder()
@@ -177,28 +183,36 @@ class BrowserAgent:
             # 2. 获取页面数据
             page_data = {}
             try:
-                analyzed = self.page_analyzer.analyze()
-                page_data = analyzed if isinstance(analyzed, dict) and analyzed.get("is_valid", True) else {}
+                if self.page_analyzer is not None:
+                    analyzed = self.page_analyzer.analyze()
+                    page_data = analyzed if isinstance(analyzed, dict) and analyzed.get("is_valid", True) else {}
+                else:
+                    self.logger.warning("PageAnalyzer未初始化")
             except Exception as analyze_err:
                 self.logger.warning(f"页面分析失败: {analyze_err}")
 
             # 3. 构建指令（考虑用户意图）
             try:
-                json_instruction = self.instruction_builder.build_optimized(text, page_data, session_state)
-                
-                # 根据用户意图调整指令
-                json_instruction = self._enhance_instruction_with_intent(json_instruction, intent_result)
-                
+                if self.instruction_builder is not None:
+                    json_instruction = self.instruction_builder.build_optimized(text, page_data, session_state)
+                    
+                    # 根据用户意图调整指令
+                    json_instruction = self._enhance_instruction_with_intent(json_instruction, intent_result)
+                else:
+                    raise RuntimeError("InstructionBuilder未初始化")
             except Exception as build_err:
                 self.logger.error(f"构建指令失败: {build_err}")
                 json_instruction = {"action": "error", "error": str(build_err)}
             
             # 4. 执行指令
-            result = self.action_executor.execute(
-                json_instruction,
-                session_state,
-                timeout=get_config("MAX_EXECUTION_TIME", 120)
-            )
+            if self.action_executor is not None:
+                result = self.action_executor.execute(
+                    json_instruction,
+                    session_state,
+                    timeout=get_config("MAX_EXECUTION_TIME", 120)
+                )
+            else:
+                raise RuntimeError("ActionExecutor未初始化")
             
             # 5. 处理执行结果并生成最终响应
             final_response = self._process_execution_result(
@@ -209,14 +223,22 @@ class BrowserAgent:
             screenshot = final_response.get("screenshot")
             if not screenshot and final_response.get("success", False) and final_response.get("take_screenshot", False):
                 try:
-                    screenshot_bytes = self.page.screenshot()
-                    screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
+                    if self.page is not None:
+                        screenshot_bytes = self.page.screenshot()
+                        screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
+                    else:
+                        self.logger.warning("Page对象未初始化，无法截图")
+                        screenshot = None
                 except Exception:
                     screenshot = None
             
             # 7. 更新页面数据
             try:
-                updated_page_data = self.page_analyzer.analyze()
+                if self.page_analyzer is not None:
+                    updated_page_data = self.page_analyzer.analyze()
+                else:
+                    self.logger.warning("PageAnalyzer未初始化，无法更新页面数据")
+                    updated_page_data = {}
             except Exception:
                 updated_page_data = {}
 
@@ -332,20 +354,23 @@ class BrowserAgent:
         
         # 使用响应生成器生成最终响应
         try:
+            # 创建响应上下文
+            response_context = {
+                "original_query": original_text,
+                "original_text": original_text,
+                "page_url": getattr(self.page, 'url', ''),
+                "session_state": session_state
+            }
+            
             generated_response = self.response_generator.generate_response(
-                extracted_content, intent_result, {
-                    "original_query": original_text,
-                    "original_text": original_text,
-                    "page_url": getattr(self.page, 'url', ''),
-                    "session_state": session_state
-                }
+                extracted_content, intent_result, response_context
             )
             
             if generated_response.success:
                 # 更新结果
                 result["message"] = generated_response.content
                 result["content"] = extracted_content  # 保留原始内容
-                result["response_format"] = generated_response.format
+                result["response_format"] = generated_response.format.value
                 result["metadata"] = generated_response.metadata
             else:
                 # 生成失败，使用默认处理
@@ -416,7 +441,10 @@ class BrowserAgent:
 
     def _handle_get_page_state(self) -> Dict[str, Any]:
         try:
-            return self.page_analyzer.analyze()
+            if self.page_analyzer is not None:
+                return self.page_analyzer.analyze()
+            else:
+                return {"success": False, "error": "PageAnalyzer未初始化"}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -429,7 +457,11 @@ class BrowserAgent:
 
     def _handle_take_screenshot(self) -> Optional[bytes]:
         try:
-            return self.page.screenshot()
+            if self.page is not None:
+                return self.page.screenshot()
+            else:
+                self.logger.warning("Page对象未初始化，无法截图")
+                return None
         except Exception:
             return None
 

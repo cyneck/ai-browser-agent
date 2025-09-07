@@ -13,6 +13,10 @@ import re
 from typing import Dict, Any, List, Optional, Callable, Union
 from playwright.sync_api import Page, Error as PlaywrightError
 
+from src.models.instruction import (
+    ActionType, BaseAction, NavigateAction, ClickAction, 
+    FillAction, WaitAction, ExtractAction
+)
 from src.common.logger import get_logger
 from src.common.performance_monitor import get_performance_monitor
 from src.action.state_manager import StateManager
@@ -43,31 +47,31 @@ class ActionExecutor:
         self.behavior_simulator = HumanBehaviorSimulator(behavior_config)
 
         # 将 action 名称映射到对应的处理方法
-        self.action_handlers: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
-            "navigate": self._execute_navigate,
-            "click": self._execute_click,
-            "fill": self._execute_fill,
-            "type": self._execute_fill,  # 'type' is an alias for 'fill'
-            "key": self._execute_key,  # Add keyboard action support
-            "select": self._execute_select,
-            "wait": self._execute_wait,
-            "screenshot": self._execute_screenshot,
-            "extract": self._execute_extract,
-            "extract_results": self._execute_extract_results,
-            "scroll": self._execute_scroll,
-            "back": self._execute_back,
-            "forward": self._execute_forward,
-            "refresh": self._execute_refresh,
-            "close": self._execute_close,
-            "error": self._execute_error,
-            "wait_for_login": self._execute_wait_for_login,
-            "smart_fill": self._execute_smart_fill,
-            "smart_submit": self._execute_smart_submit,
-            "save_as_pdf": self._execute_save_as_pdf,
-            "save_as_mhtml": self._execute_save_as_mhtml,
+        self.action_handlers: Dict[ActionType, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+            ActionType.NAVIGATE: self._execute_navigate,
+            ActionType.CLICK: self._execute_click,
+            ActionType.FILL: self._execute_fill,
+            ActionType.TYPE: self._execute_fill,  # 'type' is an alias for 'fill'
+            ActionType.KEY: self._execute_key,  # Add keyboard action support
+            ActionType.SELECT: self._execute_select,
+            ActionType.WAIT: self._execute_wait,
+            ActionType.SCREENSHOT: self._execute_screenshot,
+            ActionType.EXTRACT: self._execute_extract,
+            ActionType.EXTRACT_RESULTS: self._execute_extract_results,
+            ActionType.SCROLL: self._execute_scroll,
+            ActionType.BACK: self._execute_back,
+            ActionType.FORWARD: self._execute_forward,
+            ActionType.REFRESH: self._execute_refresh,
+            ActionType.CLOSE: self._execute_close,
+            ActionType.ERROR: self._execute_error,
+            ActionType.WAIT_FOR_LOGIN: self._execute_wait_for_login,
+            ActionType.SMART_FILL: self._execute_smart_fill,
+            ActionType.SMART_SUBMIT: self._execute_smart_submit,
+            ActionType.SAVE_AS_PDF: self._execute_save_as_pdf,
+            ActionType.SAVE_AS_MHTML: self._execute_save_as_mhtml,
         }
         
-        self.safety_validator = SafetyValidator(self.get_supported_actions())
+        self.safety_validator = SafetyValidator([action.value for action in ActionType])
 
     def _execute_wait_for_login(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """暂停执行，等待用户手动登录"""
@@ -81,7 +85,7 @@ class ActionExecutor:
 
     def get_supported_actions(self) -> List[str]:
         """获取当前支持的所有操作列表"""
-        return list(self.action_handlers.keys())
+        return [action.value for action in ActionType]
 
     def execute(self, instruction: Dict[str, Any], session_state: Dict[str, Any],
                 timeout: int = 60) -> Dict[str, Any]:
@@ -102,20 +106,26 @@ class ActionExecutor:
             self.logger.info("=" * 60)
 
             # 优化：对于直接明确的指令，跳过LLM调用
-            action = instruction.get("action")
-            if action in self.action_handlers:
-                self.logger.info(f"检测到直接指令 '{action}'，跳过LLM推理。")
-                # 如果是直接指令，确保其有 description，然后标准化为多步格式后执行
-                normalized_instruction = self._normalize_to_multi_step(instruction)
-                if "description" not in normalized_instruction:
-                    normalized_instruction["description"] = f"执行 {action} 操作"
-                return self._execute_steps(normalized_instruction, timeout)
+            action_str = instruction.get("action")
+            if action_str:
+                try:
+                    action = ActionType(action_str)
+                    if action in self.action_handlers:
+                        self.logger.info(f"检测到直接指令 '{action.value}'，跳过LLM推理。")
+                        # 如果是直接指令，确保其有 description，然后标准化为多步格式后执行
+                        normalized_instruction = self._normalize_to_multi_step(instruction)
+                        if "description" not in normalized_instruction:
+                            normalized_instruction["description"] = f"执行 {action.value} 操作"
+                        return self._execute_steps(normalized_instruction, timeout)
+                except ValueError:
+                    # 如果action_str不是有效的ActionType，继续下面的处理
+                    pass
             
             # 尝试通过简单的启发式规则识别指令
             user_text = instruction.get("user_text")
             if user_text:
                 heuristic_instruction = self._try_simple_heuristics(user_text, instruction, self.page)
-                if heuristic_instruction and heuristic_instruction.get("action") in self.action_handlers: # 确保识别到的指令是支持的指令
+                if heuristic_instruction and heuristic_instruction.get("action") in [action.value for action in ActionType]: # 确保识别到的指令是支持的指令
                     self.logger.info(f"通过启发式规则识别到指令: {heuristic_instruction.get('action')}")
                     # 如果启发式规则成功识别，将其标准化为多步格式后执行
                     # 对于导航指令，将原始的 user_text 作为 description 传递
@@ -310,36 +320,46 @@ class ActionExecutor:
 
     def _execute_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """执行单个步骤"""
-        action = step.get("action")
-        description = step.get("description", f"执行 {action} 操作")
-        self.logger.info(f"执行步骤: {action} - {description}")
+        action_str = step.get("action")
+        description = step.get("description", f"执行 {action_str} 操作")
+        self.logger.info(f"执行步骤: {action_str} - {description}")
+
+        # 尝试将action_str转换为ActionType枚举
+        try:
+            action = ActionType(action_str)
+        except ValueError:
+            return {
+                "success": False,
+                "message": f"不支持的操作类型: {action_str}",
+                "error": f"未找到操作 '{action_str}' 的处理器。"
+            }
 
         handler = self.action_handlers.get(action)
         if not handler:
             return {
                 "success": False,
-                "message": f"不支持的操作类型: {action}",
-                "error": f"未找到操作 '{action}' 的处理器。"
+                "message": f"不支持的操作类型: {action.value}",
+                "error": f"未找到操作 '{action.value}' 的处理器。"
             }
 
         # 人类行为模拟：操作前等待
-        self.behavior_simulator.wait_before_action(action)
+        self.behavior_simulator.wait_before_action(action.value)
 
         start_time = time.time()
         page_load_start = time.time()
         
         try:
             # 记录页面加载时间（如果适用）
-            if action == "navigate":
+            if action == ActionType.NAVIGATE:
                 page_load_start = time.time()
             
             result = handler(step)
             execution_time = time.time() - start_time
-            page_load_time = time.time() - page_load_start if action == "navigate" else 0
+            page_load_time = time.time() - page_load_start if action == ActionType.NAVIGATE else 0
             
             # 记录浏览器操作性能
             screenshot_size = None
-            if action == "screenshot" and result.get("data"):
+            if action == ActionType.SCREENSHOT and result.get("data"):
                 import base64
                 try:
                     screenshot_data = result["data"]
@@ -349,7 +369,7 @@ class ActionExecutor:
                     pass
             
             self.perf_monitor.record_browser_action(
-                action_type=action,
+                action_type=action.value,
                 selector=step.get("selector"),
                 execution_time=execution_time,
                 page_load_time=page_load_time,
@@ -359,12 +379,12 @@ class ActionExecutor:
             )
             
             if result.get("success"):
-                self.state_manager.set_state("last_action", action)
+                self.state_manager.set_state("last_action", action.value)
                 self.state_manager.set_state("last_message", result.get("message"))
                 
             # 记录操作历史到行为模拟器
             self.behavior_simulator.record_action(
-                action, 
+                action.value, 
                 result.get("success", False), 
                 execution_time
             )
@@ -373,7 +393,7 @@ class ActionExecutor:
         except PlaywrightError as e:
             execution_time = time.time() - start_time
             self.perf_monitor.record_browser_action(
-                action_type=action,
+                action_type=action.value,
                 selector=step.get("selector"),
                 execution_time=execution_time,
                 page_load_time=0,
@@ -382,7 +402,7 @@ class ActionExecutor:
             )
             # 记录失败的操作
             self.behavior_simulator.record_action(
-                action, 
+                action.value, 
                 False, 
                 execution_time
             )
@@ -391,7 +411,7 @@ class ActionExecutor:
         except Exception as e:
             execution_time = time.time() - start_time
             self.perf_monitor.record_browser_action(
-                action_type=action,
+                action_type=action.value,
                 selector=step.get("selector"),
                 execution_time=execution_time,
                 page_load_time=0,
@@ -400,7 +420,7 @@ class ActionExecutor:
             )
             # 记录失败的操作
             self.behavior_simulator.record_action(
-                action, 
+                action.value, 
                 False, 
                 execution_time
             )
@@ -435,19 +455,20 @@ class ActionExecutor:
                 bbox = element.bounding_box()
                 if bbox:
                     # 从当前鼠标位置移动到目标元素
-                    target_x = bbox["x"] + bbox["width"] // 2
-                    target_y = bbox["y"] + bbox["height"] // 2
+                    target_x = int(bbox["x"] + bbox["width"] // 2)  # 转换为整数
+                    target_y = int(bbox["y"] + bbox["height"] // 2)  # 转换为整数
                     
                     # 获取当前鼠标位置（如果可能）
                     try:
                         # 使用页面中心作为起始位置
-                        viewport = self.page.viewport_size()
-                        start_x = viewport["width"] // 2
-                        start_y = viewport["height"] // 2
-                        
-                        self.behavior_simulator.simulate_mouse_movement(
-                            self.page, (start_x, start_y), (target_x, target_y)
-                        )
+                        viewport = self.page.viewport_size  # 修复：viewport_size 是属性而不是方法
+                        if viewport:  # 检查viewport是否为None
+                            start_x = int(viewport["width"] // 2)  # 转换为整数
+                            start_y = int(viewport["height"] // 2)  # 转换为整数
+                            
+                            self.behavior_simulator.simulate_mouse_movement(
+                                self.page, (start_x, start_y), (target_x, target_y)
+                            )
                     except Exception as e:
                         self.logger.debug(f"鼠标移动模拟失败: {e}")
                         

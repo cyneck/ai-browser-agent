@@ -7,6 +7,7 @@ __all__ = [
 	"action",
 	"api",
 	"common",
+	"models",
 	"perception",
 	"plugins",
 	"reasoning",
