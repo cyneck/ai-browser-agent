@@ -202,6 +202,15 @@ class InstructionBuilder:
         """尝试简单的启发式规则，避免不必要的LLM调用"""
         self.logger.debug(f"_try_simple_heuristics: 进入方法，用户输入: {user_text}")
         
+        # 检查是否是询问当前页面的意图
+        if self._is_current_page_query(user_text):
+            self.logger.debug(f"_try_simple_heuristics: 检测到当前页面查询意图")
+            return {
+                "action": "extract_results",
+                "extraction_type": "auto",
+                "description": "提取当前页面信息"
+            }
+        
         nav_url = self._detect_navigation_intent_and_url(user_text)
         self.logger.debug(f"_try_simple_heuristics: 检测到的导航 URL: {nav_url}")
 
@@ -212,31 +221,9 @@ class InstructionBuilder:
             if fallback_instruction:
                 self.logger.debug(f"_try_simple_heuristics: 插件管理器返回指令")
                 return fallback_instruction
-
-        # 如果指令中包含导航URL，并且当前页面无效，则优先处理导航
-        if nav_url and (not page_data or not page_data.get("is_valid", True)):
-            host = ""
-            m = re.search(r"://([^/]+)/?", nav_url)
-            if m:
-                host = m.group(1).lower()
-
-            # 检查是否为已知可搜索站点
-            is_known_search_site = any(site in host for site in ["bing.com", "google."])
-
-            # 如果同时包含搜索意图和已知可搜索站点，则构建组合指令
-            if self._intent_is_search(user_text) and is_known_search_site:
-                # 模拟在目标页面上构建搜索动作
-                search_action = self._maybe_build_known_site_action(user_text, {"url": nav_url})
-                if search_action and "steps" in search_action:
-                    # 合并导航和搜索步骤
-                    return {
-                        "steps": [
-                            {"action": "navigate", "value": nav_url, "description": f"导航到 {nav_url}"}
-                        ] + search_action["steps"],
-                        "description": f"导航到 {nav_url} 并执行搜索"
-                    }
-
-            # 如果只是导航或不是已知可搜索站点，则只执行导航
+        
+        # 如果有导航意图，生成导航指令，无论当前页面是否有效
+        if nav_url:
             return {
                 "action": "navigate",
                 "value": nav_url,
@@ -307,6 +294,16 @@ class InstructionBuilder:
             analysis["search_intent"] = True
             analysis["search_keywords"] = [self._extract_search_keywords(user_text)]
             analysis["interaction_type"] = "search"
+            
+            # 分析当前页面是否为搜索引擎页面
+            if current_url:
+                website_plugin = self.plugin_manager.get_website_plugin(current_url)
+                if website_plugin:
+                    analysis["current_page_is_search_engine"] = True
+                    analysis["search_engine_name"] = website_plugin.__class__.__name__.replace("Plugin", "")
+                    analysis["can_search_on_current_page"] = True
+                else:
+                    analysis["current_page_is_search_engine"] = False
         
         # 分析交互类型
         if "点击" in user_text or "click" in user_text.lower():
@@ -318,13 +315,19 @@ class InstructionBuilder:
             
         return analysis
 
-
-
-
-
-
-
-
+    def _is_current_page_query(self, user_text: str) -> bool:
+        """检查是否是询问当前页面的查询"""
+        current_page_patterns = [
+            r"当前页面.*?(是|什么)",
+            r"现在.*?页面.*?(是|什么)",
+            r"这个页面.*?(是|什么)",
+            r"what.*?page.*?is",
+            r"what.*?is.*?page",
+            r"当前.*?网页.*?(是|什么)"
+        ]
+        
+        user_text_lower = user_text.lower()
+        return any(re.search(pattern, user_text_lower) for pattern in current_page_patterns)
 
     def _detect_navigation_intent_and_url(self, user_text: str) -> Optional[str]:
         """识别导航意图并提取规范化 URL。
@@ -338,8 +341,27 @@ class InstructionBuilder:
         # 2) 中文网站名称到URL的映射 (通过插件管理器获取)
         chinese_site_mapping = self.plugin_manager.get_all_site_name_mappings()
         
+        # 尝试精确匹配
         for site_name, url in chinese_site_mapping.items():
-            if site_name in user_text.lower():
+            if site_name == user_text.strip() or f"打开{site_name}" == user_text.strip() or f"访问{site_name}" == user_text.strip():
+                return url
+        
+        # 尝试模糊匹配
+        for site_name, url in chinese_site_mapping.items():
+            if site_name in user_text:
+                return url
+        
+        # 特殊处理常见的网站名称
+        site_mappings = {
+            "知乎": "https://www.zhihu.com",
+            "微博": "https://weibo.com",
+            "豆瓣": "https://www.douban.com",
+            "GitHub": "https://github.com",
+            "知乎网站": "https://www.zhihu.com"
+        }
+        
+        for site_name, url in site_mappings.items():
+            if site_name in user_text:
                 return url
         
         # 3) 裸域（仅ASCII域名与TLD），避免把中文词缀合入
@@ -395,7 +417,7 @@ class InstructionBuilder:
         }
 
     def _intent_is_search(self, instruction: str) -> bool:
-        return bool(re.search(r"(搜索|查询|找|新闻|news|search|哪些|什么|怎么样|如何|情况|多少|现在|是什么|怎样)", instruction, re.IGNORECASE))
+        return bool(re.search(r"(搜索|搜搜|查询|找|新闻|news|search|哪些|什么|怎么样|如何|情况|多少|现在|是什么|怎样|天气|日天)", instruction, re.IGNORECASE))
 
     def _extract_query_from_instruction(self, instruction: str) -> str:
         m = re.search(r"(?:搜索|查询|找)(.+)", instruction)
@@ -585,6 +607,7 @@ class InstructionBuilder:
         # 常见搜索模式
         patterns = [
             r"搜索[\s'\"]*([^'\"，。]+)",
+            r"搜搜[\s'\"]*([^'\"，。]+)",
             r"查找[\s'\"]*([^'\"，。]+)", 
             r"查询[\s'\"]*([^'\"，。]+)",
             r"在.+?搜索[\s'\"]*([^'\"，。]+)",
@@ -605,13 +628,16 @@ class InstructionBuilder:
                     return keyword
         
         # 如果没有匹配到特定模式，尝试提取核心词汇
-        # 移除常见的动词和介词
-        cleaned = re.sub(r"(打开|访问|进入|搜索|查找|查询|点击|输入|在|上|的|并|然后|请|帮我|小红书)", "", instruction)
+        # 智能移除常见的动词和介词，但保留核心内容
+        # 移除常见的操作词汇，但保留具体的搜索内容
+        action_words = r"(打开|访问|进入|搜索|搜搜|查找|查询|点击|输入|在|上|的|并|然后|请|帮我)"
+        cleaned = re.sub(action_words, "", instruction)
         cleaned = cleaned.strip()
         
-        if cleaned:
+        if cleaned and len(cleaned) > 1:
             return cleaned
         
+        # 如果清理后太短，返回原始指令
         return instruction.strip()
 
     def _build_xiaohongshu_fallback_strategy(self, user_text: str) -> Dict[str, Any]:
@@ -676,7 +702,8 @@ class InstructionBuilder:
                 if step["action"] not in [
                     "navigate", "click", "fill", "select", "wait",
                     "screenshot", "extract", "extract_results", "scroll", "back",
-                    "forward", "refresh", "close", "error", "wait_for_login"
+                    "forward", "refresh", "close", "error", "wait_for_login",
+                    "smart_fill", "smart_submit", "key"
                 ]:
                     raise ValueError(f"第{i + 1}步操作的类型'{step['action']}'不受支持")
                 if step["action"] == "navigate" and "value" not in step:
@@ -690,7 +717,8 @@ class InstructionBuilder:
             if instruction["action"] not in [
                 "navigate", "click", "fill", "select", "wait",
                 "screenshot", "extract", "extract_results", "scroll", "back",
-                "forward", "refresh", "close", "error", "wait_for_login"
+                "forward", "refresh", "close", "error", "wait_for_login",
+                "smart_fill", "smart_submit", "key"
             ]:
                 raise ValueError(f"操作类型'{instruction['action']}'不受支持")
             if instruction["action"] == "navigate" and "value" not in instruction:

@@ -131,10 +131,18 @@ class UserPrompts:
         # Search context
         if context_analysis.get("search_intent"):
             keywords = ", ".join(context_analysis.get("search_keywords", []))
-            context_info += f"""
-搜索意图识别: 用户想要搜索 "{keywords}"
-请生成包含导航、找到搜索框、输入关键词、触发搜索的完整流程。
-            """
+            context_info += f"""搜索意图识别: 用户想要搜索 "{keywords}"""
+            
+            # 如果当前在搜索引擎页面，提供更具体的指导
+            if context_analysis.get("current_page_is_search_engine"):
+                search_engine = context_analysis.get("search_engine_name", "")
+                context_info += f"""当前页面状态: 已在{search_engine}搜索引擎页面
+建议操作: 直接在当前页面搜索框输入新的搜索关键词并执行搜索
+注意: 使用适合当前搜索引擎的元素选择器和交互方式"""
+            else:
+                context_info += """建议操作: 导航到搜索引擎（如百度、Bing、Google），然后执行搜索"""
+            
+            context_info += """请生成包含搜索框定位、关键词输入、搜索触发、结果等待和内容提取的完整流程。"""
         
         # Interaction type context
         interaction_type = context_analysis.get("interaction_type", "unknown")

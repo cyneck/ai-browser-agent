@@ -57,7 +57,8 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--cli", action="store_true", help="启动命令行界面")
     group.add_argument("--web", action="store_true", help="启动Web界面")
-    parser.add_argument("--text", type=str, help="要执行的自然语言文本（仅在cli模式下有效，如果提供此参数，则直接执行文本并退出，不进入交互模式）")
+    parser.add_argument("--text", type=str, help="要执行的自然语言文本（仅在cli模式下有效）")
+    parser.add_argument("--interactive", action="store_true", help="启用交互式模式，与--text结合使用可进行多轮对话")
     args = parser.parse_args()
     
     # 设置环境
@@ -68,8 +69,14 @@ def main():
         if args.text:
             from src.api.cli import CLIInterface
             cli = CLIInterface()
-            cli.initialize_and_execute(args.text)
+            if args.interactive:
+                # 交互式文本模式：执行初始文本后继续交互
+                cli.start_interactive_text_mode(args.text)
+            else:
+                # 单次执行模式：执行完毕后退出
+                cli.initialize_and_execute(args.text)
         else:
+            # 普通CLI交互模式
             start_cli_mode()
     elif args.web:
         host = config.get("WEB_HOST", "127.0.0.1")

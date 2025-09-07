@@ -88,12 +88,18 @@ class BrowserAgent:
             user_data_dir = get_config("USER_DATA_DIR", "./browser_data")
             Path(user_data_dir).mkdir(parents=True, exist_ok=True)
             
-            self.logger.info(f"启动{browser_type}浏览器，headless={headless}")
+            self.logger.info(f"启动{browser_type}浏览器，headless={headless}，user_data_dir={user_data_dir}")
             self.playwright = sync_playwright().start()
             browser_instance = getattr(self.playwright, browser_type)
             
-            self.browser = browser_instance.launch(headless=headless)
-            self.context = self.browser.new_context(user_agent="AI Browser Agent/1.0")
+            # 使用launch_persistent_context替代launch和new_context
+            self.context = browser_instance.launch_persistent_context(
+                user_data_dir=user_data_dir,
+                headless=headless,
+                user_agent="AI Browser Agent/1.0"
+            )
+            # 在持久化上下文中，不需要单独的browser对象
+            self.browser = None
             self.page = self.context.new_page()
             
             self.page_analyzer = PageAnalyzer(self.page)
@@ -370,7 +376,8 @@ class BrowserAgent:
     def _cleanup_resources(self):
         """在Playwright线程内部安全地关闭所有资源"""
         self.logger.info("开始关闭Playwright资源")
-        resources = [self.page, self.context, self.browser]
+        # 在持久化上下文模式中，只需要关闭context，不需要单独关闭browser
+        resources = [self.page, self.context]
         for resource in resources:
             if resource:
                 try:

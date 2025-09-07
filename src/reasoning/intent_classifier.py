@@ -139,9 +139,10 @@ class IntentClassifier:
         """
         user_text_lower = user_text.lower()
         
-        # Score each intent type
+        # Score each intent type and extract domain keywords
         intent_scores = {}
         matched_keywords = []
+        domain_keywords = self._extract_domain_keywords(user_text_lower)
         
         for intent_type, patterns in self.intent_patterns.items():
             score = 0
@@ -153,6 +154,9 @@ class IntentClassifier:
             
             if score > 0:
                 intent_scores[intent_type] = score
+        
+        # Combine pattern-matched keywords with domain keywords
+        all_keywords = list(set(matched_keywords + domain_keywords))
         
         # Determine response format preference
         response_format = "natural_language"
@@ -176,7 +180,7 @@ class IntentClassifier:
         return IntentResult(
             intent_type=best_intent,
             confidence=confidence,
-            keywords=list(set(matched_keywords)),
+            keywords=all_keywords,
             response_format=response_format,
             additional_params=additional_params
         )
@@ -240,3 +244,29 @@ class IntentClassifier:
                     break
         
         return params
+    
+    def _extract_domain_keywords(self, user_text: str) -> List[str]:
+        """Extract domain-specific keywords from user text"""
+        domain_keywords = []
+        
+        # Weather related keywords
+        weather_keywords = ["天气", "temperature", "weather", "温度", "气温", "气候"]
+        if any(keyword in user_text for keyword in weather_keywords):
+            domain_keywords.extend(weather_keywords)
+        
+        # Price related keywords
+        price_keywords = ["价格", "price", "股价", "费用", "cost", "元", "¥", "$"]
+        if any(keyword in user_text for keyword in price_keywords):
+            domain_keywords.extend(price_keywords)
+        
+        # News related keywords
+        news_keywords = ["新闻", "news", "消息", "headline"]
+        if any(keyword in user_text for keyword in news_keywords):
+            domain_keywords.extend(news_keywords)
+        
+        # Time related keywords
+        time_keywords = ["时间", "time", "日期", "date", "when"]
+        if any(keyword in user_text for keyword in time_keywords):
+            domain_keywords.extend(time_keywords)
+        
+        return domain_keywords

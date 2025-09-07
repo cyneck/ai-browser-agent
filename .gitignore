@@ -22,6 +22,8 @@
 *.swo
 *~
 
+browser_data/
+
 # Emacs
 *~
 \#*\#

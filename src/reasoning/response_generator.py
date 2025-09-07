@@ -48,6 +48,7 @@ class SummaryInfoStrategy(ResponseStrategy):
     
     def __init__(self):
         self.extraction_engine = ExtractionEngine()
+        self.logger = get_logger()
     
     def can_handle(self, intent_type: IntentType) -> bool:
         return intent_type == IntentType.SUMMARY_INFO
@@ -56,7 +57,10 @@ class SummaryInfoStrategy(ResponseStrategy):
                 context: Dict[str, Any]) -> GeneratedResponse:
         """Generate concise summary response using template-driven extraction"""
         
+        self.logger.info(f"开始生成摘要信息响应，意图关键词: {intent_result.keywords}")
+        
         if not extracted_data:
+            self.logger.warning("没有提取到数据")
             return GeneratedResponse(
                 content="抱歉，未能获取到相关信息。",
                 format="natural_language",
@@ -65,25 +69,35 @@ class SummaryInfoStrategy(ResponseStrategy):
                 error="No data extracted"
             )
         
+        self.logger.info(f"提取到的数据类型: {type(extracted_data)}")
+        
         # Handle different data types
         if isinstance(extracted_data, list) and extracted_data:
+            self.logger.info(f"处理列表数据，项目数量: {len(extracted_data)}")
             # Use template-driven extraction for search results
             summary = self.extraction_engine.extract_information(
                 extracted_data, intent_result.keywords
             )
             
+            self.logger.info(f"模板驱动提取结果: {summary}")
+            
             # Fallback to generic extraction if template-driven fails
             if not summary:
+                self.logger.info("模板驱动提取失败，使用通用摘要")
                 summary = self._extract_generic_summary(extracted_data)
                 
         elif isinstance(extracted_data, dict):
+            self.logger.info("处理字典数据")
             # For structured data, extract relevant fields
             summary = self._extract_summary_from_structured_data(
                 extracted_data, intent_result
             )
         else:
+            self.logger.info("处理文本数据")
             # For text content, summarize
             summary = self._extract_summary_from_text(str(extracted_data))
+        
+        self.logger.info(f"最终摘要: {summary}")
         
         return GeneratedResponse(
             content=summary,
@@ -290,7 +304,7 @@ class ResponseGenerator:
         ]
     
     def generate_response(self, extracted_data: Any, intent_result: IntentResult, 
-                         context: Dict[str, Any] = None) -> GeneratedResponse:
+                         context: Optional[Dict[str, Any]] = None) -> GeneratedResponse:
         """
         Generate appropriate response based on intent and extracted data
         

@@ -62,6 +62,8 @@ class ActionExecutor:
             "close": self._execute_close,
             "error": self._execute_error,
             "wait_for_login": self._execute_wait_for_login,
+            "smart_fill": self._execute_smart_fill,
+            "smart_submit": self._execute_smart_submit,
         }
         
         self.safety_validator = SafetyValidator(self.get_supported_actions())
@@ -755,6 +757,121 @@ class ActionExecutor:
             self.logger.error(f"自动提取内容失败: {e}")
             return ""
         
+    def _execute_smart_fill(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """智能填充操作，处理多元素选择器的情况"""
+        query = step.get("query", "")
+        if not query:
+            return {"success": False, "message": "智能填充失败：查询内容为空"}
+        
+        # 百度特定的智能选择器策略
+        selectors_priority = [
+            "#kw",  # 传统搜索框（优先）
+            "input[name='wd']",  # 备用搜索框
+            "#chat-textarea"  # AI聊天框（最后选择）
+        ]
+        
+        for selector in selectors_priority:
+            try:
+                # 检查元素是否存在且可见
+                element = self.page.locator(selector)
+                if element.count() > 0 and element.is_visible():
+                    # 使用人类打字模拟
+                    if self.behavior_simulator.is_enabled():
+                        self.behavior_simulator.simulate_human_typing(self.page, selector, query)
+                    else:
+                        element.fill(query)
+                    
+                    self.logger.info(f"成功使用选择器 {selector} 填充内容")
+                    return {
+                        "success": True, 
+                        "message": f"成功在百度搜索框中输入 '{query}'",
+                        "used_selector": selector
+                    }
+            except Exception as e:
+                self.logger.debug(f"选择器 {selector} 失败: {e}")
+                continue
+        
+        return {
+            "success": False, 
+            "message": "智能填充失败：未找到可用的搜索框"
+        }
+    
+    def _execute_smart_submit(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """智能提交操作，根据元素类型选择最佳提交方式"""
+        # 百度特定的智能提交策略
+        submit_strategies = [
+            # 策略 1: 在传统搜索框上按 Enter
+            {
+                "selector": "#kw, input[name='wd']",
+                "method": "enter_key",
+                "description": "在传统搜索框上按回车键"
+            },
+            # 策略 2: 点击搜索按钮
+            {
+                "selector": "#su, .s_btn, .btn-search",
+                "method": "click",
+                "description": "点击搜索按钮"
+            },
+            # 策略 3: 在AI聊天框上按 Enter
+            {
+                "selector": "#chat-textarea",
+                "method": "enter_key",
+                "description": "在AI聊天框上按回车键"
+            },
+            # 策略 4: 点击AI提交按钮
+            {
+                "selector": "#chat-submit-button, .chat-submit",
+                "method": "click",
+                "description": "点击AI提交按钮"
+            }
+        ]
+        
+        for strategy in submit_strategies:
+            try:
+                selector = strategy["selector"]
+                method = strategy["method"]
+                description = strategy["description"]
+                
+                # 检查元素是否存在
+                element = self.page.locator(selector)
+                if element.count() > 0:
+                    # 检查元素是否可见（对于按钮）
+                    if method == "click":
+                        visible_element = None
+                        for i in range(element.count()):
+                            if element.nth(i).is_visible():
+                                visible_element = element.nth(i)
+                                break
+                        
+                        if visible_element:
+                            visible_element.click()
+                            self.logger.info(f"成功执行策略: {description}")
+                            return {
+                                "success": True,
+                                "message": f"成功{description}",
+                                "strategy": description
+                            }
+                    else:  # enter_key
+                        # 对于输入框，只需要存在即可
+                        if element.count() > 0:
+                            # 先聚焦到元素，然后按Enter
+                            element.first.focus()
+                            self.page.keyboard.press("Enter")
+                            self.logger.info(f"成功执行策略: {description}")
+                            return {
+                                "success": True,
+                                "message": f"成功{description}",
+                                "strategy": description
+                            }
+            except Exception as e:
+                self.logger.debug(f"策略 '{strategy['description']}' 失败: {e}")
+                continue
+        
+        return {
+            "success": False,
+            "message": "智能提交失败：未找到可用的提交方式"
+        }
+    
     def get_behavior_stats(self) -> Dict[str, Any]:
         """获取人类行为模拟统计信息"""
         return self.behavior_simulator.get_stats()
