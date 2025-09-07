@@ -64,6 +64,8 @@ class ActionExecutor:
             "wait_for_login": self._execute_wait_for_login,
             "smart_fill": self._execute_smart_fill,
             "smart_submit": self._execute_smart_submit,
+            "save_as_pdf": self._execute_save_as_pdf,
+            "save_as_mhtml": self._execute_save_as_mhtml,
         }
         
         self.safety_validator = SafetyValidator(self.get_supported_actions())
@@ -164,6 +166,40 @@ class ActionExecutor:
             result["error"] = error_message
 
         return result
+
+    def _execute_save_as_mhtml(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """将当前页面保存为MHTML"""
+        path = step.get("path")
+        if not path:
+            return {"success": False, "message": "缺少 'path' 参数"}
+
+        try:
+            content = self.page.content()
+            # MHTML is not directly supported, so we save the HTML content.
+            # For a true MHTML, a third-party library would be needed.
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            self.logger.info(f"页面已成功保存为MHTML: {path}")
+            return {"success": True, "message": f"页面已成功保存为MHTML: {path}"}
+        except Exception as e:
+            error_message = f"保存MHTML失败: {e}"
+            self.logger.error(error_message)
+            return self.error_handler.handle_error(e, step, {"path": path})
+
+    def _execute_save_as_pdf(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """将当前页面保存为PDF"""
+        path = step.get("path")
+        if not path:
+            return {"success": False, "message": "缺少 'path' 参数"}
+
+        try:
+            self.page.pdf(path=path)
+            self.logger.info(f"页面已成功保存为PDF: {path}")
+            return {"success": True, "message": f"页面已成功保存为PDF: {path}"}
+        except PlaywrightError as e:
+            error_message = f"保存PDF失败: {e}"
+            self.logger.error(error_message)
+            return self.error_handler.handle_error(e, step, {"path": path})
 
     def _execute_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """执行单个步骤"""

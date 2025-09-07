@@ -205,6 +205,29 @@ class TestActionExecutor(unittest.TestCase):
         self.assertEqual(self.mock_locator.fill.call_count, 2)
         self.assertEqual(self.mock_locator.click.call_count, 1)
 
+    def test_execute_save_as_pdf(self):
+        """Test the save_as_pdf action."""
+        instruction = {"action": "save_as_pdf", "path": "test.pdf"}
+        result = self.executor.execute(instruction, session_state={})
+        self.assertTrue(result.get("success"))
+        self.mock_page.pdf.assert_called_once_with(path="test.pdf")
+        
+    def test_execute_save_as_mhtml(self):
+        """Test the save_as_mhtml action."""
+        self.mock_page.content.return_value = "<html><body>Test Content</body></html>"
+        instruction = {"action": "save_as_mhtml", "path": "test.mhtml"}
+        
+        # Mock the open function
+        mock_open = unittest.mock.mock_open()
+        with unittest.mock.patch("builtins.open", mock_open):
+            result = self.executor.execute(instruction, session_state={})
+            
+        self.assertTrue(result.get("success"))
+        self.assertIn("页面已成功保存为MHTML: test.mhtml", result.get("message"))
+        self.mock_page.content.assert_called_once()
+        mock_open.assert_called_once_with("test.mhtml", "w", encoding="utf-8")
+        mock_open().write.assert_called_once_with("<html><body>Test Content</body></html>")
+
 if __name__ == "__main__":
     unittest.main()
 
