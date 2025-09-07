@@ -36,7 +36,20 @@ def load_config() -> Dict[str, Any]:
     
     # 必需的配置项及其默认值
     required_configs = {
+        # LLM配置
+        "LLM_PROVIDER": "gemini",  # gemini, openai, qwen, ollama
         "GEMINI_API_KEY": "",  # 可选，留空将使用降级路径
+        "GEMINI_MODEL": "gemini-1.5-flash",
+        "OPENAI_API_KEY": "",
+        "OPENAI_BASE_URL": "",
+        "OPENAI_MODEL": "gpt-3.5-turbo",
+        "QWEN_API_KEY": "",
+        "QWEN_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "QWEN_MODEL": "qwen-turbo",
+        "OLLAMA_ENABLED": "false",
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "OLLAMA_MODEL": "llama2",
+        
         "BROWSER_TYPE": "chromium",
         "HEADLESS": "false",
         "USER_DATA_DIR": str(root_dir / "browser_data"),
@@ -69,7 +82,7 @@ def load_config() -> Dict[str, Any]:
         config[key] = value
     
     # 转换布尔值
-    bool_configs = ["HEADLESS", "HUMAN_BEHAVIOR_ENABLED", "HUMAN_MOUSE_MOVE_ENABLED"]
+    bool_configs = ["HEADLESS", "HUMAN_BEHAVIOR_ENABLED", "HUMAN_MOUSE_MOVE_ENABLED", "OLLAMA_ENABLED"]
     for key in bool_configs:
         if key in config:
             if str(config[key]).lower() in ("true", "1", "yes"):

@@ -6,12 +6,11 @@
 
 负责安全地执行标准化的JSON格式指令，与浏览器交互。
 """
-
 import json
 import time
 import base64
+import re
 from typing import Dict, Any, List, Optional, Callable, Union
-
 from playwright.sync_api import Page, Error as PlaywrightError
 
 from src.common.logger import get_logger
@@ -102,6 +101,28 @@ class ActionExecutor:
             self.logger.info(f"执行指令: {json.dumps(instruction, ensure_ascii=False, indent=2)}")
             self.logger.info("=" * 60)
 
+            # 优化：对于直接明确的指令，跳过LLM调用
+            action = instruction.get("action")
+            if action in self.action_handlers:
+                self.logger.info(f"检测到直接指令 '{action}'，跳过LLM推理。")
+                # 如果是直接指令，确保其有 description，然后标准化为多步格式后执行
+                normalized_instruction = self._normalize_to_multi_step(instruction)
+                if "description" not in normalized_instruction:
+                    normalized_instruction["description"] = f"执行 {action} 操作"
+                return self._execute_steps(normalized_instruction, timeout)
+            
+            # 尝试通过简单的启发式规则识别指令
+            user_text = instruction.get("user_text")
+            if user_text:
+                heuristic_instruction = self._try_simple_heuristics(user_text, instruction, self.page)
+                if heuristic_instruction and heuristic_instruction.get("action") in self.action_handlers: # 确保识别到的指令是支持的指令
+                    self.logger.info(f"通过启发式规则识别到指令: {heuristic_instruction.get('action')}")
+                    # 如果启发式规则成功识别，将其标准化为多步格式后执行
+                    # 对于导航指令，将原始的 user_text 作为 description 传递
+                    if heuristic_instruction.get("action") == "navigate":
+                        heuristic_instruction["description"] = user_text
+                    return self._execute_steps(self._normalize_to_multi_step(heuristic_instruction), timeout)
+
             # 安全校验与转义
             instruction = self.safety_validator.validate_and_sanitize(instruction)
 
@@ -115,10 +136,60 @@ class ActionExecutor:
 
     def _normalize_to_multi_step(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
         """将单步指令标准化为多步格式"""
-        return {
+        # 确保 description 总是存在
+        action_type = instruction.get('action', '未知')
+        description = instruction.get("description", f"执行 {action_type} 操作")
+        result = {
             "steps": [instruction],
-            "description": instruction.get("description", f"执行 {instruction.get('action', '未知')} 操作")
+            "description": description,
+            "success": instruction.get("success", True) # 默认成功，除非instruction明确指定失败
         }
+        return result
+
+    def _try_simple_heuristics(self, user_text: str, instruction: Dict[str, Any], page: Page | None = None) -> Optional[Dict[str, Any]]:
+        """尝试通过简单的启发式规则从user_text中识别指令"""
+        if not user_text:
+            return None
+
+        intent = self._extract_intent_from_user_text(user_text, page)
+        if not intent:
+            return None
+        
+        result = self._handle_instruction_with_intent(intent)
+        return result
+
+    def _extract_intent_from_user_text(self, user_text: str, page: Page | None = None) -> dict | None:
+        """
+        从用户文本中提取指令意图。
+        """
+        self.logger.debug(f"尝试从用户文本中提取意图: {user_text}")
+        # TODO: 实现更复杂的意图提取逻辑
+        if "前往" in user_text or "导航到" in user_text:
+            url_pattern = re.compile(r"https?://(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?://[a-zA-Z0-9]+\.[^\s]{2,}|[a-zA-Z0-9]+\.[^\s]{2,}")
+            match = url_pattern.search(user_text)
+            if match:
+                url = match.group(0)
+                self.logger.info(f"从用户文本中提取到URL: {url}")
+                return {"action": "navigate", "args": {"url": url}}
+        
+        return None
+
+    def _handle_instruction_with_intent(self, intent: dict) -> dict:
+        """
+        根据提取到的意图处理指令，生成符合多步格式的指令。
+        """
+        # TODO: 实现更完整的指令处理逻辑
+        action = intent.get("action")
+        args = intent.get("args", {})
+        description = f"执行 {action} 操作" # Fallback description
+
+        if action == "navigate":
+            url = args.get('url')
+            description = f"导航到 {url}"
+            return {"action": action, "args": args, "description": description, "success": True}
+        
+        return {"action": action, "args": args, "description": description, "success": False}
+
 
     def _execute_steps(self, instruction: Dict[str, Any], timeout: int) -> Dict[str, Any]:
         """统一的步骤执行方法"""
@@ -169,18 +240,36 @@ class ActionExecutor:
 
     def _execute_save_as_mhtml(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """将当前页面保存为MHTML"""
-        path = step.get("path")
-        if not path:
-            return {"success": False, "message": "缺少 'path' 参数"}
-
+        import os
+        from datetime import datetime
+        
+        # 使用固定下载路径配置
+        download_dir = "./downloads"
+        os.makedirs(download_dir, exist_ok=True)
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"page_{timestamp}.mhtml"
+        path = os.path.join(download_dir, filename)
+        
         try:
             content = self.page.content()
             # MHTML is not directly supported, so we save the HTML content.
             # For a true MHTML, a third-party library would be needed.
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(content)
+            
+            # 构建下载URL
+            file_name = os.path.basename(path)
+            download_url = f"/download/{file_name}"
+            
             self.logger.info(f"页面已成功保存为MHTML: {path}")
-            return {"success": True, "message": f"页面已成功保存为MHTML: {path}"}
+            return {
+                "success": True, 
+                "message": f"页面已成功保存为MHTML: {path}", 
+                "download_url": download_url,
+                "path": path
+            }
         except Exception as e:
             error_message = f"保存MHTML失败: {e}"
             self.logger.error(error_message)
@@ -188,14 +277,32 @@ class ActionExecutor:
 
     def _execute_save_as_pdf(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """将当前页面保存为PDF"""
-        path = step.get("path")
-        if not path:
-            return {"success": False, "message": "缺少 'path' 参数"}
-
+        import os
+        from datetime import datetime
+        
+        # 使用固定下载路径配置
+        download_dir = "./downloads"
+        os.makedirs(download_dir, exist_ok=True)
+        
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"page_{timestamp}.pdf"
+        path = os.path.join(download_dir, filename)
+        
         try:
             self.page.pdf(path=path)
+            
+            # 构建下载URL
+            file_name = os.path.basename(path)
+            download_url = f"/download/{file_name}"
+            
             self.logger.info(f"页面已成功保存为PDF: {path}")
-            return {"success": True, "message": f"页面已成功保存为PDF: {path}"}
+            return {
+                "success": True, 
+                "message": f"页面已成功保存为PDF: {path}",
+                "download_url": download_url,
+                "path": path
+            }
         except PlaywrightError as e:
             error_message = f"保存PDF失败: {e}"
             self.logger.error(error_message)

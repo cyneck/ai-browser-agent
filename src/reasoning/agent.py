@@ -251,7 +251,7 @@ class BrowserAgent:
             
             # 如果是信息获取类意图，确保有提取步骤
             if intent_result.intent_type in [IntentType.SUMMARY_INFO, IntentType.DETAILED_INFO, IntentType.STRUCTURED_DATA]:
-                # 检查是否已经有提取动作
+                # 棻查是否已经有提取动作
                 has_extract = any(step.get("action") in ["extract_results", "extract"] for step in steps)
                 
                 if not has_extract:
@@ -259,18 +259,24 @@ class BrowserAgent:
                     extract_step = self._create_extract_step_for_intent(intent_result)
                     steps.append(extract_step)
             
-            # 如果是全页面内容意图，确保使用全页面提取
+            # 如果是全页面内容意图，但指令中没有保存操作，则添加全页面内容提取
             elif intent_result.intent_type == IntentType.FULL_PAGE_CONTENT:
-                # 添加全页面内容提取
-                steps.append({
-                    "action": "extract_results",
-                    "extraction_type": "full_content",
-                    "description": "提取完整页面内容"
-                })
+                # 检查是否已经有保存网页的操作
+                has_save_action = any(step.get("action") in ["save_as_mhtml", "save_as_pdf"] for step in steps)
+                
+                # 只有在没有保存操作时才添加提取步骤
+                if not has_save_action:
+                    steps.append({
+                        "action": "extract_results",
+                        "extraction_type": "full_content",
+                        "description": "提取完整页面内容"
+                    })
         
         else:
             # 单步骤指令，根据意图调整
-            if intent_result.intent_type == IntentType.FULL_PAGE_CONTENT and instruction.get("action") != "extract_results":
+            if (intent_result.intent_type == IntentType.FULL_PAGE_CONTENT and 
+                instruction.get("action") not in ["save_as_mhtml", "save_as_pdf"] and
+                instruction.get("action") != "extract_results"):
                 # 转换为全页面内容提取
                 instruction = {
                     "action": "extract_results",
@@ -328,6 +334,7 @@ class BrowserAgent:
         try:
             generated_response = self.response_generator.generate_response(
                 extracted_content, intent_result, {
+                    "original_query": original_text,
                     "original_text": original_text,
                     "page_url": getattr(self.page, 'url', ''),
                     "session_state": session_state

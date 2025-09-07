@@ -16,15 +16,10 @@ import os
 import re
 from typing import Dict, Any, List, Optional
 
-# 可选导入 Gemini SDK，测试可通过打桩替换
-try:
-    import google.generativeai as genai  # type: ignore
-except Exception:
-    genai = None  # type: ignore
-
 from src.common.config import get_config
 from src.common.logger import get_logger
 from src.common.performance_monitor import get_performance_monitor
+from src.common.llm_manager import get_llm_manager
 from src.prompts.prompt_manager import PromptManager
 from src.plugins.plugin_manager import PluginManager
 
@@ -35,9 +30,9 @@ class InstructionBuilder:
     def __init__(self):
         """初始化指令构建器"""
         self.logger = get_logger()
-        self.api_key = get_config("GEMINI_API_KEY")
         self.prompt_manager = PromptManager()
         self.plugin_manager = PluginManager()
+        self.llm_manager = get_llm_manager()
 
 
     def build(self, user_text: str, page_data: Dict[str, Any],
@@ -470,96 +465,72 @@ class InstructionBuilder:
         
         self.logger.debug("_call_llm: 开始调用 LLM")
         
-        if not self.api_key:
-            self.logger.warning("GEMINI_API_KEY 未配置，使用内置启发式")
-            return self._fallback_instruction_generation(prompt)
-            
-        if genai is None:
-            self.logger.warning("Gemini SDK 未安装，使用内置启发式")
+        # 检查是否有可用的LLM提供商
+        available_providers = self.llm_manager.get_available_providers()
+        if not available_providers:
+            self.logger.warning("没有配置任何LLM提供商，使用内置启发式")
             return self._fallback_instruction_generation(prompt)
             
         try:
-            self.logger.debug("_call_llm: 配置 Gemini API")
-            genai.configure(api_key=self.api_key)
-            model_name = get_config("GEMINI_MODEL", "gemini-1.5-flash")
-            model = genai.GenerativeModel(model_name)
+            # 获取配置的LLM提供商和模型
+            llm_provider = get_config("LLM_PROVIDER", "gemini")
+            model_name = None  # 使用提供商的默认模型
+            
+            # 如果配置了特定模型，则使用
+            if llm_provider == "gemini":
+                model_name = get_config("GEMINI_MODEL")
+            elif llm_provider == "openai":
+                model_name = get_config("OPENAI_MODEL")
+            elif llm_provider == "qwen":
+                model_name = get_config("QWEN_MODEL")
+            elif llm_provider == "ollama":
+                model_name = get_config("OLLAMA_MODEL")
+            
+            self.logger.debug(f"_call_llm: 调用 {llm_provider} API")
             
             # 获取性能监控器
             perf_monitor = get_performance_monitor()
             start_time = time.time()
             prompt_tokens = int(len(prompt.split()) * 1.3)  # 粗略估算token数
             
-            self.logger.debug("_call_llm: 开始调用 Gemini API")
+            # 调用LLM
+            result = self.llm_manager.call_llm(prompt, llm_provider, model_name)
+            text = result.get("text", "")
+            response_time = time.time() - start_time
             
-            # 添加超时控制
-            import threading
-            import queue
+            self.logger.debug(f"_call_llm: {llm_provider} API 返回成功，耗时 {response_time:.2f}秒")
             
-            result_queue = queue.Queue()
-            error_queue = queue.Queue()
-            
-            def api_call():
-                try:
-                    resp = model.generate_content(prompt)
-                    result_queue.put(resp)
-                except Exception as e:
-                    error_queue.put(e)
-            
-            # 在单独线程中执行 API 调用
-            thread = threading.Thread(target=api_call)
-            thread.daemon = True
-            thread.start()
-            
-            # 等待结果，最多 10 秒
-            thread.join(timeout=10)
-            
-            if thread.is_alive():
-                self.logger.error("_call_llm: Gemini API 调用超时，使用启发式降级")
-                return self._fallback_instruction_generation(prompt)
-            
-            if not error_queue.empty():
-                raise error_queue.get()
-            
-            if not result_queue.empty():
-                resp = result_queue.get()
-                text = getattr(resp, "text", "") or ""
-                response_time = time.time() - start_time
+            try:
+                # 尝试从响应中提取JSON
+                json_instruction = self.llm_manager.extract_json_from_response(text)
                 
-                self.logger.debug(f"_call_llm: Gemini API 返回成功，耗时 {response_time:.2f}秒")
+                completion_tokens = int(len(text.split()) * 1.3)
+                perf_monitor.record_llm_call(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    response_time=response_time,
+                    model_name=f"{llm_provider}/{model_name or 'default'}",
+                    success=True
+                )
                 
-                try:
-                    blocks = self._extract_code_blocks(text, "json")
-                    if blocks:
-                        text = blocks[0]
-                    json_instruction = json.loads(text)
-                    
-                    completion_tokens = int(len(text.split()) * 1.3)
-                    perf_monitor.record_llm_call(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=completion_tokens,
-                        response_time=response_time,
-                        model_name=model_name,
-                        success=True
-                    )
-                    
-                    return json_instruction
-                except Exception as e:
-                    perf_monitor.record_llm_call(
-                        prompt_tokens=prompt_tokens,
-                        completion_tokens=0,
-                        response_time=time.time() - start_time,
-                        model_name=model_name,
-                        success=False,
-                        error_message=str(e)
-                    )
-                    self.logger.warning(f"_call_llm: LLM返回无效JSON，使用启发式降级: {e}")
-                    return self._fallback_instruction_generation(prompt)
-            else:
-                self.logger.error("_call_llm: 无法获取 API 响应，使用启发式降级")
+                return json_instruction
+            except Exception as e:
+                perf_monitor.record_llm_call(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=0,
+                    response_time=time.time() - start_time,
+                    model_name=f"{llm_provider}/{model_name or 'default'}",
+                    success=False,
+                    error_message=str(e)
+                )
+                self.logger.warning(f"_call_llm: LLM返回无效JSON，使用启发式降级: {e}")
                 return self._fallback_instruction_generation(prompt)
                 
         except Exception as e:
-            self.logger.error(f"_call_llm: 调用Gemini失败: {e}，使用启发式降级")
+            # 确保llm_provider已定义
+            if 'llm_provider' not in locals():
+                llm_provider = "unknown"
+            self.logger.error(f"_call_llm: 调用{llm_provider}失败: {e}，使用启发式降级")
             return self._fallback_instruction_generation(prompt)
     
     def _fallback_instruction_generation(self, prompt: str) -> Dict[str, Any]:
@@ -666,7 +637,19 @@ class InstructionBuilder:
         # 截图
         if any(word in instruction_lower for word in ["截图", "screenshot", "截取"]):
             return {"action": "screenshot", "description": "截取页面截图"}
-        
+
+        # 保存为mhtml (更具体的匹配应该放在"保存"之前)
+        if any(word in instruction_lower for word in ["保存为html", "save as html", "保存为网页"]):
+            return {"action": "save_as_mhtml", "description": "保存为html"}
+            
+        # 保存为pdf (更通用的匹配应该放在更具体匹配之后)
+        if any(word in instruction_lower for word in ["保存为pdf", "save as pdf"]):
+            return {"action": "save_as_pdf", "description": "保存为pdf"}
+            
+        # 通用保存操作 (最通用的匹配应该放在最后)
+        if any(word in instruction_lower for word in ["保存"]):
+            return {"action": "save_as_pdf", "description": "保存为pdf"}
+
         # 返回
         if any(word in instruction_lower for word in ["返回", "back", "上一页"]):
             return {"action": "back", "description": "返回上一页"}
@@ -682,6 +665,7 @@ class InstructionBuilder:
                 "selector": "button:first, a:first, [role='button']:first",
                 "description": "点击页面元素"
             }
+
         
         # 默认等待
         return {
@@ -703,7 +687,7 @@ class InstructionBuilder:
                     "navigate", "click", "fill", "select", "wait",
                     "screenshot", "extract", "extract_results", "scroll", "back",
                     "forward", "refresh", "close", "error", "wait_for_login",
-                    "smart_fill", "smart_submit", "key"
+                    "smart_fill", "smart_submit", "key","save_as_pdf", "save_as_mhtml"
                 ]:
                     raise ValueError(f"第{i + 1}步操作的类型'{step['action']}'不受支持")
                 if step["action"] == "navigate" and "value" not in step:
@@ -718,7 +702,7 @@ class InstructionBuilder:
                 "navigate", "click", "fill", "select", "wait",
                 "screenshot", "extract", "extract_results", "scroll", "back",
                 "forward", "refresh", "close", "error", "wait_for_login",
-                "smart_fill", "smart_submit", "key"
+                "smart_fill", "smart_submit", "key","save_as_pdf", "save_as_mhtml"
             ]:
                 raise ValueError(f"操作类型'{instruction['action']}'不受支持")
             if instruction["action"] == "navigate" and "value" not in instruction:
@@ -729,5 +713,3 @@ class InstructionBuilder:
                 raise ValueError(f"'{instruction['action']}'操作缺少必需的'value'字段")
             # Note: URL validation removed - no domain filtering
         return instruction
-
-

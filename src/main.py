@@ -53,7 +53,7 @@ def start_web_mode(host, port):
 
 def main():
     """主函数"""
-    parser = argparse.ArgumentParser(description="AI浏览器代理")
+    parser = argparse.ArgumentParser(description="AI浏览器智能体")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--cli", action="store_true", help="启动命令行界面")
     group.add_argument("--web", action="store_true", help="启动Web界面")

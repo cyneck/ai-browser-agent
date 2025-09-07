@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass
 
 from src.reasoning.intent_classifier import IntentType, IntentResult
-from src.reasoning.extraction_templates import ExtractionEngine
+from src.reasoning.llm_extractor import LLMExtractor
 from src.common.logger import get_logger
 
 
@@ -44,10 +44,10 @@ class ResponseStrategy(ABC):
 
 
 class SummaryInfoStrategy(ResponseStrategy):
-    """Strategy for generating summary information responses"""
+    """Strategy for generating summary information responses using LLM-based extraction"""
     
     def __init__(self):
-        self.extraction_engine = ExtractionEngine()
+        self.llm_extractor = LLMExtractor()
         self.logger = get_logger()
     
     def can_handle(self, intent_type: IntentType) -> bool:
@@ -55,9 +55,12 @@ class SummaryInfoStrategy(ResponseStrategy):
     
     def generate(self, extracted_data: Any, intent_result: IntentResult, 
                 context: Dict[str, Any]) -> GeneratedResponse:
-        """Generate concise summary response using template-driven extraction"""
+        """Generate concise summary response using LLM-based extraction"""
         
         self.logger.info(f"开始生成摘要信息响应，意图关键词: {intent_result.keywords}")
+        
+        # Get original query from context
+        original_query = context.get("original_query", "")
         
         if not extracted_data:
             self.logger.warning("没有提取到数据")
@@ -74,16 +77,16 @@ class SummaryInfoStrategy(ResponseStrategy):
         # Handle different data types
         if isinstance(extracted_data, list) and extracted_data:
             self.logger.info(f"处理列表数据，项目数量: {len(extracted_data)}")
-            # Use template-driven extraction for search results
-            summary = self.extraction_engine.extract_information(
-                extracted_data, intent_result.keywords
+            # Use LLM-based extraction for search results
+            summary = self.llm_extractor.extract_information(
+                extracted_data, original_query
             )
             
-            self.logger.info(f"模板驱动提取结果: {summary}")
+            self.logger.info(f"LLM提取结果: {summary}")
             
-            # Fallback to generic extraction if template-driven fails
+            # Fallback to generic extraction if LLM-based fails
             if not summary:
-                self.logger.info("模板驱动提取失败，使用通用摘要")
+                self.logger.info("LLM提取失败，使用通用摘要")
                 summary = self._extract_generic_summary(extracted_data)
                 
         elif isinstance(extracted_data, dict):
@@ -148,24 +151,36 @@ class SummaryInfoStrategy(ResponseStrategy):
 
 
 class StructuredDataStrategy(ResponseStrategy):
-    """Strategy for generating structured data responses"""
+    """Strategy for generating structured data responses using LLM-based extraction"""
+    
+    def __init__(self):
+        self.llm_extractor = LLMExtractor()
+        self.logger = get_logger()
     
     def can_handle(self, intent_type: IntentType) -> bool:
         return intent_type == IntentType.STRUCTURED_DATA
     
     def generate(self, extracted_data: Any, intent_result: IntentResult, 
                 context: Dict[str, Any]) -> GeneratedResponse:
-        """Generate structured data response"""
+        """Generate structured data response using LLM-based extraction"""
         
         structure_type = intent_result.additional_params.get("structure_type", "auto")
         
         if isinstance(extracted_data, list):
-            if structure_type == "table" or structure_type == "auto":
-                structured_content = self._format_as_table(extracted_data)
-                format_type = "table"
+            # Use LLM to extract structured data
+            structured_result = self.llm_extractor.extract_structured_data(extracted_data, structure_type)
+            
+            if structured_result and structured_result.get("structured_data"):
+                structured_content = self._format_structured_data(structured_result["structured_data"], structure_type)
+                format_type = structure_type if structure_type != "auto" else "table"
             else:
-                structured_content = self._format_as_list(extracted_data)
-                format_type = "list"
+                # Fallback to original formatting
+                if structure_type == "table" or structure_type == "auto":
+                    structured_content = self._format_as_table(extracted_data)
+                    format_type = "table"
+                else:
+                    structured_content = self._format_as_list(extracted_data)
+                    format_type = "list"
         else:
             structured_content = json.dumps(extracted_data, ensure_ascii=False, indent=2)
             format_type = "json"
@@ -176,6 +191,13 @@ class StructuredDataStrategy(ResponseStrategy):
             metadata={"item_count": len(extracted_data) if isinstance(extracted_data, list) else 1},
             success=True
         )
+    
+    def _format_structured_data(self, data: List[Dict], structure_type: str) -> str:
+        """Format LLM-extracted structured data"""
+        if structure_type == "table" or structure_type == "auto":
+            return self._format_as_table(data)
+        else:
+            return self._format_as_list(data)
     
     def _format_as_table(self, data: List[Dict]) -> str:
         """Format data as table"""
@@ -224,6 +246,10 @@ class StructuredDataStrategy(ResponseStrategy):
 class DetailedInfoStrategy(ResponseStrategy):
     """Strategy for generating detailed information responses"""
     
+    def __init__(self):
+        self.llm_extractor = LLMExtractor()
+        self.logger = get_logger()
+    
     def can_handle(self, intent_type: IntentType) -> bool:
         return intent_type == IntentType.DETAILED_INFO
     
@@ -232,7 +258,13 @@ class DetailedInfoStrategy(ResponseStrategy):
         """Generate detailed information response"""
         
         if isinstance(extracted_data, list):
-            content = self._format_detailed_list(extracted_data)
+            # First try to use LLM for detailed extraction
+            structured_result = self.llm_extractor.extract_structured_data(extracted_data, "detailed")
+            
+            if structured_result and structured_result.get("structured_data"):
+                content = self._format_detailed_structured_data(structured_result["structured_data"])
+            else:
+                content = self._format_detailed_list(extracted_data)
         elif isinstance(extracted_data, dict):
             content = self._format_detailed_dict(extracted_data)
         else:
@@ -244,6 +276,20 @@ class DetailedInfoStrategy(ResponseStrategy):
             metadata={"detail_level": "comprehensive"},
             success=True
         )
+    
+    def _format_detailed_structured_data(self, data: List[Dict]) -> str:
+        """Format LLM-extracted detailed structured data"""
+        sections = []
+        for i, item in enumerate(data, 1):
+            section = f"=== 项目 {i} ==="
+            if isinstance(item, dict):
+                for key, value in item.items():
+                    section += f"\n{key}: {value}"
+            else:
+                section += f"\n{str(item)}"
+            sections.append(section)
+        
+        return "\n\n".join(sections)
     
     def _format_detailed_list(self, data: List) -> str:
         """Format list data with full details"""
