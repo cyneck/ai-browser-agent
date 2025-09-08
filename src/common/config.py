@@ -48,7 +48,8 @@ def load_config() -> Dict[str, Any]:
         "QWEN_MODEL": "qwen-turbo",
         "OLLAMA_ENABLED": "false",
         "OLLAMA_BASE_URL": "http://localhost:11434",
-        "OLLAMA_MODEL": "llama2",
+        "OLLAMA_MODEL": "qwen3:4b",  # 更新为实际安装的模型
+        "OLLAMA_TIMEOUT": "120",  # 添加OLLAMA_TIMEOUT配置项，默认120秒
         
         "BROWSER_TYPE": "chromium",
         "HEADLESS": "false",
@@ -94,7 +95,7 @@ def load_config() -> Dict[str, Any]:
                 config[key] = False
     
     # 转换整数值
-    for key in ["WEB_PORT", "MAX_EXECUTION_TIME"]:
+    for key in ["WEB_PORT", "MAX_EXECUTION_TIME", "OLLAMA_TIMEOUT"]:  # 添加OLLAMA_TIMEOUT
         config[key] = int(config[key])
         
     # 转换浮点数值

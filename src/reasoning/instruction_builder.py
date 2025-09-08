@@ -61,6 +61,48 @@ class InstructionBuilder:
                 session_state=session_state
             )
 
+            # 检查是否有可用的LLM提供商
+            available_providers = self.llm_manager.get_available_providers()
+            if available_providers:
+                # 如果有可用的LLM，优先使用LLM而不是简单启发式规则
+                self.logger.debug("检测到可用的LLM提供商，优先使用LLM")
+                
+                # 提取对话历史
+                conversation_history = session_state.get("conversation_history", [])
+
+                # 构建提示词
+                prompt = self.prompt_manager.build_complete_prompt(
+                    user_text,
+                    page_data,
+                    conversation_history
+                )
+
+                # 调用LLM生成指令
+                json_instruction = self._call_llm(prompt)
+
+                # 验证指令格式
+                validated_instruction = self._validate_instruction(json_instruction, page_data)
+
+                # 更新对话历史
+                conversation_history.append({
+                    "role": "user",
+                    "content": user_text
+                })
+                conversation_history.append({
+                    "role": "assistant",
+                    "content": json.dumps(validated_instruction)
+                })
+
+                # 限制对话历史长度
+                if len(conversation_history) > 10:
+                    conversation_history = conversation_history[-10:]
+
+                # 更新会话状态
+                session_state["conversation_history"] = conversation_history
+
+                self.logger.info("指令构建完成")
+                return validated_instruction
+
             # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
             if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
                 # 先尝试使用插件管理器的智能回退功能
@@ -157,53 +199,59 @@ class InstructionBuilder:
             # 提取对话历史
             conversation_history = session_state.get("conversation_history", [])
             
-            # 先检查简单的预定义操作（无需LLM）
-            self.logger.debug("检查简单启发式规则...")
+            # 检查是否有可用的LLM提供商
+            available_providers = self.llm_manager.get_available_providers()
+            if available_providers:
+                # 如果有可用的LLM，优先使用LLM而不是简单启发式规则
+                self.logger.debug("检测到可用的LLM提供商，优先使用LLM")
+                
+                # 智能上下文分析
+                self.logger.debug("执行智能上下文分析...")
+                context_analysis = self._analyze_context(user_text, page_data, conversation_history)
+                
+                # 构建增强的提示词（一次性生成完整流程）
+                self.logger.debug("构建增强提示词...")
+                enhanced_prompt = self.prompt_manager.build_enhanced_prompt(
+                    user_text, 
+                    page_data, 
+                    conversation_history,
+                    context_analysis
+                )
+                
+                # 单次LLM调用生成完整指令
+                self.logger.debug("调用LLM生成指令...")
+                json_instruction = self._call_llm(enhanced_prompt)
+                
+                # 验证指令格式
+                self.logger.debug("验证指令格式...")
+                validated_instruction = self._validate_instruction(json_instruction, page_data)
+                
+                # 更新对话历史
+                conversation_history.append({
+                    "role": "user",
+                    "content": user_text
+                })
+                conversation_history.append({
+                    "role": "assistant", 
+                    "content": json.dumps(validated_instruction)
+                })
+                
+                # 限制对话历史长度
+                if len(conversation_history) > 10:
+                    conversation_history = conversation_history[-10:]
+                
+                # 更新会话状态
+                session_state["conversation_history"] = conversation_history
+                
+                self.logger.info("优化指令构建完成")
+                return validated_instruction
+            
+            # 如果没有可用的LLM提供商，则使用简单启发式规则
+            self.logger.debug("未检测到可用的LLM提供商，使用简单启发式规则")
             simple_action = self._try_simple_heuristics(user_text, page_data)
             if simple_action:
                 self.logger.info("使用简单启发式规则，无需LLM")
                 return simple_action
-            
-            # 智能上下文分析
-            self.logger.debug("执行智能上下文分析...")
-            context_analysis = self._analyze_context(user_text, page_data, conversation_history)
-            
-            # 构建增强的提示词（一次性生成完整流程）
-            self.logger.debug("构建增强提示词...")
-            enhanced_prompt = self.prompt_manager.build_enhanced_prompt(
-                user_text, 
-                page_data, 
-                conversation_history,
-                context_analysis
-            )
-            
-            # 单次LLM调用生成完整指令
-            self.logger.debug("调用LLM生成指令...")
-            json_instruction = self._call_llm(enhanced_prompt)
-            
-            # 验证指令格式
-            self.logger.debug("验证指令格式...")
-            validated_instruction = self._validate_instruction(json_instruction, page_data)
-            
-            # 更新对话历史
-            conversation_history.append({
-                "role": "user",
-                "content": user_text
-            })
-            conversation_history.append({
-                "role": "assistant", 
-                "content": json.dumps(validated_instruction)
-            })
-            
-            # 限制对话历史长度
-            if len(conversation_history) > 10:
-                conversation_history = conversation_history[-10:]
-            
-            # 更新会话状态
-            session_state["conversation_history"] = conversation_history
-            
-            self.logger.info("优化指令构建完成")
-            return validated_instruction
             
         except Exception as e:
             self.logger.error(f"优化构建指令时发生错误: {str(e)}")
@@ -228,12 +276,18 @@ class InstructionBuilder:
         self.logger.debug(f"_try_simple_heuristics: 检测到的导航 URL: {nav_url}")
 
         # 使用插件管理器的智能回退功能处理所有网站限制
+        # 但如果是小红书且设置了直接访问，则跳过回退策略
         if nav_url:
-            self.logger.debug(f"_try_simple_heuristics: 尝试插件管理器回退策略")
-            fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
-            if fallback_instruction:
-                self.logger.debug(f"_try_simple_heuristics: 插件管理器返回指令")
-                return fallback_instruction
+            # 检查是否是小红书并且设置了直接访问
+            is_xiaohongshu = "xiaohongshu.com" in nav_url
+            direct_access = get_config("XIAOHONGSHU_DIRECT_ACCESS", "false").lower() == "true"
+            
+            if not (is_xiaohongshu and direct_access):
+                self.logger.debug(f"_try_simple_heuristics: 尝试插件管理器回退策略")
+                fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
+                if fallback_instruction:
+                    self.logger.debug(f"_try_simple_heuristics: 插件管理器返回指令")
+                    return fallback_instruction
         
         # 如果有导航意图，生成导航指令，无论当前页面是否有效
         if nav_url:
@@ -243,27 +297,42 @@ class InstructionBuilder:
                 "description": f"导航到 {nav_url}"
             }
 
-        # 新增逻辑：如果无导航意图，但有搜索意图，且当前页面为空，则默认使用Bing搜索
+        # 新增逻辑：如果无导航意图，但有搜索意图，且当前页面为空，则默认使用优先级搜索引擎搜索
         if not nav_url and self._intent_is_search(user_text) and (not page_data or not page_data.get("is_valid", True)):
-            self.logger.debug(f"_try_simple_heuristics: 构建优化的 Bing 搜索指令")
+            self.logger.debug(f"_try_simple_heuristics: 构建优化的搜索引擎搜索指令")
             search_keywords = self._extract_search_keywords(user_text)
             self.logger.debug(f"_try_simple_heuristics: 提取的搜索关键词: {search_keywords}")
             
-            # 优化方案：直接导航到Bing首页，然后使用搜索框+回车键
-            optimized_bing_search = {
-                "steps": [
-                    {"action": "navigate", "value": "https://www.bing.com", "description": "导航到Bing首页"},
-                    {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
-                    {"action": "wait", "selector": "input[name='q'], #sb_form_q", "timeout": 5000, "description": "等待Bing搜索框加载"},
-                    {"action": "fill", "selector": "input[name='q'], #sb_form_q", "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
-                    {"action": "key", "selector": "input[name='q'], #sb_form_q", "value": "Enter", "description": "按回车键执行搜索"},
-                    {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
-                    {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
-                ],
-                "description": f"在Bing上搜索: {search_keywords}"
+            # 使用搜索引擎优先级配置
+            from src.common.search_engines import get_primary_search_engine
+            primary_engine = get_primary_search_engine()
+            
+            # 构建搜索步骤
+            steps = [
+                {"action": "navigate", "value": primary_engine["url"], "description": f"导航到{primary_engine['display_name']}首页"},
+                {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
+                {"action": "wait", "selector": primary_engine["search_box_selector"], "timeout": 5000, "description": f"等待{primary_engine['display_name']}搜索框加载"},
+                {"action": "fill", "selector": primary_engine["search_box_selector"], "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
+            ]
+            
+            # 根据搜索引擎的推荐提交方式添加步骤
+            if primary_engine["submit_method"] == "enter_key":
+                steps.append({"action": "key", "selector": primary_engine["search_box_selector"], "value": "Enter", "description": "按回车键执行搜索"})
+            else:
+                # 百度使用点击按钮的方式
+                steps.append({"action": "click", "selector": "#su", "description": f"点击{primary_engine['display_name']}搜索按钮"})
+            
+            steps.extend([
+                {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
+                {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
+            ])
+            
+            optimized_search = {
+                "steps": steps,
+                "description": f"在{primary_engine['display_name']}上搜索: {search_keywords}"
             }
-            self.logger.debug(f"_try_simple_heuristics: 返回优化的 Bing 搜索指令")
-            return optimized_bing_search
+            self.logger.debug(f"_try_simple_heuristics: 返回优化的搜索引擎搜索指令")
+            return optimized_search
 
         # 如果当前已在某个页面上，则检查是否为已知站点的简单操作
         self.logger.debug(f"_try_simple_heuristics: 检查已知站点操作")
@@ -571,16 +640,34 @@ class InstructionBuilder:
             # 更智能的搜索关键词提取
             search_keywords = self._extract_search_keywords(user_instruction)
             
-            # 检测是否在百度页面
-            if "百度" in prompt or "baidu.com" in prompt:
-                return {
-                    "steps": [
-                        {"action": "wait", "selector": "#kw", "timeout": 3000, "description": "等待百度搜索框加载"},
-                        {"action": "fill", "selector": "#kw", "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
-                        {"action": "click", "selector": "#su", "description": "点击搜索按钮"}
-                    ],
-                    "description": f"在百度搜索: {search_keywords}"
-                }
+            # 使用搜索引擎优先级配置进行通用搜索
+            from src.common.search_engines import get_primary_search_engine
+            primary_engine = get_primary_search_engine()
+            
+            # 构建搜索步骤
+            steps = [
+                {"action": "navigate", "value": primary_engine["url"], "description": f"导航到{primary_engine['display_name']}"},
+                {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
+                {"action": "wait", "selector": primary_engine["search_box_selector"], "timeout": 5000, "description": f"等待{primary_engine['display_name']}搜索框加载"},
+                {"action": "fill", "selector": primary_engine["search_box_selector"], "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
+            ]
+            
+            # 根据搜索引擎的推荐提交方式添加步骤
+            if primary_engine["submit_method"] == "enter_key":
+                steps.append({"action": "key", "selector": primary_engine["search_box_selector"], "value": "Enter", "description": "按回车键执行搜索"})
+            else:
+                # 百度使用点击按钮的方式
+                steps.append({"action": "click", "selector": "#su", "description": f"点击{primary_engine['display_name']}搜索按钮"})
+            
+            steps.extend([
+                {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
+                {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
+            ])
+            
+            return {
+                "steps": steps,
+                "description": f"在{primary_engine['display_name']}搜索: {search_keywords}"
+            }
         
         # 导航意图检测
         url = self._detect_navigation_intent_and_url(user_instruction)
@@ -639,17 +726,18 @@ class InstructionBuilder:
         # 提取搜索关键词
         keywords = self._extract_search_keywords(user_text)
         
+        # 使用通用的搜索引擎回退策略构建器
+        from src.common.search_engines import build_search_fallback_strategy
+        strategies = build_search_fallback_strategy("xiaohongshu.com", keywords)
+        
+        # 返回第一个（优先级最高的）策略
+        primary_strategy = strategies[0]
         return {
-            "steps": [
-                {"action": "navigate", "value": "https://www.baidu.com", "description": "导航到百度"},
-                {"action": "wait", "selector": "#kw", "timeout": 5000, "description": "等待百度搜索框"},
-                {"action": "fill", "selector": "#kw", "value": f"site:xiaohongshu.com {keywords}", "description": f"搜索小红书站内内容: {keywords}"},
-                {"action": "click", "selector": "#su", "description": "点击百度搜索"}
-            ],
-            "description": f"通过百度搜索小红书内容: {keywords}",
+            "steps": primary_strategy["steps"],
+            "description": primary_strategy["description"],
             "fallback_info": {
                 "reason": "小红书可能存在网络访问限制（错误代码300012）",
-                "strategy": "使用百度站内搜索作为替代方案"
+                "strategy": primary_strategy["description"]
             }
         }
     

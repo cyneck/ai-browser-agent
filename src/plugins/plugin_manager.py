@@ -210,9 +210,46 @@ class PluginManager:
             all_mappings.update(plugin.get_site_name_mapping())
         return all_mappings
     
+    def __init__(self, plugin_dir: Optional[str] = None):
+        """初始化插件管理器
+        
+        Args:
+            plugin_dir: 插件目录路径，默认为当前文件所在目录
+        """
+        self.logger = get_logger()
+        
+        # 设置插件目录
+        if plugin_dir is None:
+            self.plugin_dir = Path(__file__).parent
+        else:
+            self.plugin_dir = Path(plugin_dir)
+        
+        # 插件字典，键为插件名称，值为插件实例
+        self.plugins: Dict[str, Plugin] = {}
+        # 网站插件列表
+        self.website_plugins: List[BaseWebsitePlugin] = []
+        
+        # 搜索引擎优先级配置
+        self.search_engine_priority = ["google", "bing", "baidu"]
+        
+        # 加载插件
+        self.load_plugins()
+    
+    def set_search_engine_priority(self, engines: List[str]):
+        """设置搜索引擎优先级
+        
+        Args:
+            engines: 搜索引擎名称列表，按优先级排序
+        """
+        self.search_engine_priority = engines
+    
+    def get_search_engine_priority(self) -> List[str]:
+        """获取当前搜索引擎优先级"""
+        return self.search_engine_priority
+    
     def build_instruction_with_fallback(self, user_text: str, target_url: str) -> Optional[Dict[str, Any]]:
         """
-        为指定网站构建指令，如果网站存在访问限制则使用回退策略。
+        为指定网站构建指令，如果网站存在访问限制则使用搜索引擎优先级配置。
         
         Args:
             user_text: 用户输入的自然语言文本
@@ -230,18 +267,30 @@ class PluginManager:
             # 提取搜索关键词
             query = self._extract_search_keywords_from_text(user_text)
             
-            # 获取回退策略
-            fallback_strategies = plugin.build_fallback_strategies(query)
-            if fallback_strategies:
-                # 使用第一个策略作为主要策略
-                primary_strategy = fallback_strategies[0]
+            # 使用搜索引擎优先级配置构建回退策略
+            engines = self.get_search_engine_priority()
+            if engines:
+                # 使用第一个引擎作为主要策略
+                primary_engine = engines[0]
+                primary_strategy = {
+                    "action": "search",
+                    "engine": primary_engine,
+                    "value": query,
+                    "description": f"使用{primary_engine}搜索: {query}"
+                }
+                
+                # 构建替代策略
+                alternative_strategies = []
+                for engine in engines[1:]:
+                    alternative_strategies.append(f"使用{engine}搜索: {query}")
+                
                 return {
-                    "steps": primary_strategy["steps"],
+                    "steps": [primary_strategy],
                     "description": f"网络限制回退: {primary_strategy['description']}",
                     "fallback_info": {
                         "reason": f"该网站存在访问限制",
                         "primary_strategy": primary_strategy["description"],
-                        "alternative_strategies": [s["description"] for s in fallback_strategies[1:]]
+                        "alternative_strategies": alternative_strategies
                     }
                 }
         

@@ -166,6 +166,9 @@ class OllamaProvider(LLMProvider):
             raise ImportError("Requests library not installed")
 
         try:
+            # 从配置中读取超时时间，默认为120秒
+            timeout = int(get_config("OLLAMA_TIMEOUT", "120"))
+            
             url = f"{self.base_url}/api/generate"
             payload = {
                 "model": model_name,
@@ -173,7 +176,7 @@ class OllamaProvider(LLMProvider):
                 "stream": False
             }
 
-            response = requests.post(url, json=payload, timeout=30)
+            response = requests.post(url, json=payload, timeout=timeout)
             response.raise_for_status()
 
             data = response.json()
@@ -331,7 +334,10 @@ class LLMManager:
         try:
             return json.loads(text)
         except json.JSONDecodeError as e:
+            # 打印原始响应数据以便诊断问题
             self.logger.warning(f"Failed to parse JSON from LLM response: {e}")
+            self.logger.warning(f"Raw LLM response:\n{text}")
+            self.logger.warning(f"Response length: {len(text)} characters")
             raise
 
 
