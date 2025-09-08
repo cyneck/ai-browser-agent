@@ -10,7 +10,9 @@ import json
 import time
 import base64
 import re
+import os
 from typing import Dict, Any, List, Optional, Callable, Union
+from datetime import datetime
 from playwright.sync_api import Page, Error as PlaywrightError
 
 from src.models.instruction import (
@@ -23,6 +25,7 @@ from src.action.state_manager import StateManager
 from src.action.error_handler import ErrorHandler
 from src.action.safety_validator import SafetyValidator
 from src.action.human_behavior_simulator import HumanBehaviorSimulator
+from src.common.config import get_config
 
 
 class ActionExecutor:
@@ -45,6 +48,7 @@ class ActionExecutor:
         self.error_handler = error_handler or ErrorHandler()
         self.perf_monitor = get_performance_monitor()
         self.behavior_simulator = HumanBehaviorSimulator(behavior_config)
+        self.debug_mode = get_config("DEBUG_MODE", False)
 
         # 将 action 名称映射到对应的处理方法
         self.action_handlers: Dict[ActionType, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
@@ -221,6 +225,10 @@ class ActionExecutor:
             step_result = self._execute_step(step)
             step_results.append(step_result)
 
+            # 如果启用了调试模式，保存截图和MHTML
+            if self.debug_mode:
+                self._save_debug_info(step, step_result, i+1)
+
             if not step_result.get("success", False):
                 error_message = f"第 {i + 1} 步操作失败: {step_result.get('message', '未知错误')}"
                 overall_success = False
@@ -247,6 +255,51 @@ class ActionExecutor:
             result["error"] = error_message
 
         return result
+
+    def _save_debug_info(self, step: Dict[str, Any], step_result: Dict[str, Any], step_index: int):
+        """保存调试信息，包括截图和MHTML页面信息"""
+        try:
+            # 创建调试目录
+            debug_dir = "./debug"
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            # 生成时间戳
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # 保存截图
+            try:
+                screenshot_bytes = self.page.screenshot()
+                screenshot_filename = f"screenshot_step{step_index}_{timestamp}.jpeg"
+                screenshot_path = os.path.join(debug_dir, screenshot_filename)
+                
+                # 保存为JPEG格式
+                from PIL import Image
+                import io
+                image = Image.open(io.BytesIO(screenshot_bytes))
+                image = image.convert("RGB")  # 转换为RGB模式以支持JPEG
+                image.save(screenshot_path, "JPEG")
+                
+                self.logger.info(f"调试截图已保存: {screenshot_path}")
+            except ImportError as e:
+                self.logger.error(f"保存调试截图失败，缺少PIL库: {e}")
+            except Exception as e:
+                self.logger.error(f"保存调试截图失败: {e}")
+            
+            # 保存MHTML页面信息
+            try:
+                mhtml_filename = f"page_step{step_index}_{timestamp}.mhtml"
+                mhtml_path = os.path.join(debug_dir, mhtml_filename)
+                
+                content = self.page.content()
+                with open(mhtml_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                
+                self.logger.info(f"调试MHTML已保存: {mhtml_path}")
+            except Exception as e:
+                self.logger.error(f"保存调试MHTML失败: {e}")
+                
+        except Exception as e:
+            self.logger.error(f"保存调试信息失败: {e}")
 
     def _execute_save_as_mhtml(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """将当前页面保存为MHTML"""

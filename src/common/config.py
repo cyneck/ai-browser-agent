@@ -59,6 +59,9 @@ def load_config() -> Dict[str, Any]:
         "WEB_PORT": "8000",
         "MAX_EXECUTION_TIME": "60",
         
+        # 调试配置
+        "DEBUG_MODE": "false",  # 启用调试模式，保存截图和页面信息
+        
         # 人类行为模拟配置
         "HUMAN_BEHAVIOR_ENABLED": "true",
         "HUMAN_BEHAVIOR_MODE": "moderate",  # conservative, moderate, aggressive
@@ -82,7 +85,7 @@ def load_config() -> Dict[str, Any]:
         config[key] = value
     
     # 转换布尔值
-    bool_configs = ["HEADLESS", "HUMAN_BEHAVIOR_ENABLED", "HUMAN_MOUSE_MOVE_ENABLED", "OLLAMA_ENABLED"]
+    bool_configs = ["HEADLESS", "HUMAN_BEHAVIOR_ENABLED", "HUMAN_MOUSE_MOVE_ENABLED", "OLLAMA_ENABLED", "DEBUG_MODE"]
     for key in bool_configs:
         if key in config:
             if str(config[key]).lower() in ("true", "1", "yes"):
