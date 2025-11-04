@@ -35,19 +35,20 @@ def setup_environment():
     return config
 
 
-def start_cli_mode():
+def start_cli_mode(output_format="text"):
     """启动命令行交互模式"""
     from src.api.cli import CLIInterface
     
-    cli = CLIInterface()
+    cli = CLIInterface(output_format=output_format)
     cli.start()
 
 
-def start_web_mode(host, port):
+def start_web_mode(host, port, enable_auth=False):
     """启动Web交互模式"""
     from src.api.web import WebInterface
     
-    web = WebInterface()
+    # 强制禁用认证
+    web = WebInterface(enable_auth=False)
     web.start(host, port)
 
 
@@ -59,6 +60,8 @@ def main():
     group.add_argument("--web", action="store_true", help="启动Web界面")
     parser.add_argument("--text", type=str, help="要执行的自然语言文本（仅在cli模式下有效）")
     parser.add_argument("--interactive", action="store_true", help="启用交互式模式，与--text结合使用可进行多轮对话")
+    parser.add_argument("--format", choices=["text", "json", "csv", "markdown"], default="text", help="CLI输出格式")
+    parser.add_argument("--auth", action="store_true", help="启用API认证（仅在web模式下有效）")
     args = parser.parse_args()
     
     # 设置环境
@@ -68,7 +71,7 @@ def main():
     if args.cli:
         if args.text:
             from src.api.cli import CLIInterface
-            cli = CLIInterface()
+            cli = CLIInterface(output_format=args.format)
             if args.interactive:
                 # 交互式文本模式：执行初始文本后继续交互
                 cli.start_interactive_text_mode(args.text)
@@ -77,11 +80,11 @@ def main():
                 cli.initialize_and_execute(args.text)
         else:
             # 普通CLI交互模式
-            start_cli_mode()
+            start_cli_mode(args.format)
     elif args.web:
         host = config.get("WEB_HOST", "127.0.0.1")
         port = int(config.get("WEB_PORT", 8000))
-        start_web_mode(host, port)
+        start_web_mode(host, port, args.auth)
 
 
 if __name__ == "__main__":

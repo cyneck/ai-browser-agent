@@ -177,6 +177,8 @@ class InstructionBuilder:
         1. 更好的上下文感知：分析当前页面状态和用户意图
         2. 一次性生成完整指令：包括导航+操作的完整流程
         3. 避免分阶段执行：减少LLM调用次数
+        4. 智能错误修正和指令优化
+        5. 任务分解和执行计划生成
         
         Args:
             user_text: 用户输入的自然语言文本
@@ -218,13 +220,21 @@ class InstructionBuilder:
                     context_analysis
                 )
                 
-                # 单次LLM调用生成完整指令
-                self.logger.debug("调用LLM生成指令...")
-                json_instruction = self._call_llm(enhanced_prompt)
+                # 多提供商智能调用策略
+                self.logger.debug("使用多提供商智能调用策略...")
+                json_instruction = self._call_llm_with_fallback(enhanced_prompt, available_providers)
+                
+                # 智能指令优化和错误修正
+                self.logger.debug("执行智能指令优化...")
+                optimized_instruction = self._optimize_instruction(json_instruction, page_data, context_analysis)
                 
                 # 验证指令格式
                 self.logger.debug("验证指令格式...")
-                validated_instruction = self._validate_instruction(json_instruction, page_data)
+                validated_instruction = self._validate_instruction(optimized_instruction, page_data)
+                
+                # 任务分解检查
+                self.logger.debug("检查是否需要任务分解...")
+                final_instruction = self._apply_task_decomposition(validated_instruction, context_analysis)
                 
                 # 更新对话历史
                 conversation_history.append({
@@ -233,7 +243,7 @@ class InstructionBuilder:
                 })
                 conversation_history.append({
                     "role": "assistant", 
-                    "content": json.dumps(validated_instruction)
+                    "content": json.dumps(final_instruction)
                 })
                 
                 # 限制对话历史长度
@@ -244,7 +254,7 @@ class InstructionBuilder:
                 session_state["conversation_history"] = conversation_history
                 
                 self.logger.info("优化指令构建完成")
-                return validated_instruction
+                return final_instruction
             
             # 如果没有可用的LLM提供商，则使用简单启发式规则
             self.logger.debug("未检测到可用的LLM提供商，使用简单启发式规则")
@@ -823,4 +833,362 @@ class InstructionBuilder:
             if instruction["action"] in ["fill", "select"] and "value" not in instruction:
                 raise ValueError(f"'{instruction['action']}'操作缺少必需的'value'字段")
             # Note: URL validation removed - no domain filtering
+        return instruction
+    
+    def _call_llm_with_fallback(self, prompt: str, available_providers: List[str]) -> Dict[str, Any]:
+        """使用多提供商智能调用策略，支持自动降级"""
+        # 定义提供商优先级
+        provider_priority = ["gemini", "openai", "qwen", "ollama"]
+        
+        # 按优先级排序可用提供商
+        sorted_providers = [p for p in provider_priority if p in available_providers]
+        sorted_providers.extend([p for p in available_providers if p not in provider_priority])
+        
+        last_error = None
+        
+        for provider in sorted_providers:
+            try:
+                self.logger.debug(f"尝试使用 {provider} 提供商")
+                
+                # 获取提供商特定的模型
+                model_name = self._get_optimal_model_for_provider(provider)
+                
+                # 调用LLM
+                result = self.llm_manager.call_llm(prompt, provider, model_name)
+                text = result.get("text", "")
+                
+                # 尝试解析JSON
+                json_instruction = self.llm_manager.extract_json_from_response(text)
+                
+                self.logger.info(f"成功使用 {provider} 生成指令")
+                return json_instruction
+                
+            except Exception as e:
+                last_error = e
+                self.logger.warning(f"{provider} 提供商调用失败: {e}")
+                continue
+        
+        # 所有提供商都失败，使用启发式降级
+        self.logger.error(f"所有LLM提供商调用失败，最后错误: {last_error}")
+        return self._fallback_instruction_generation(prompt)
+    
+    def _get_optimal_model_for_provider(self, provider: str) -> str:
+        """为指定提供商选择最优模型"""
+        optimal_models = {
+            "gemini": get_config("GEMINI_MODEL", "gemini-1.5-flash"),
+            "openai": get_config("OPENAI_MODEL", "gpt-4o-mini"),  # 使用更强的模型
+            "qwen": get_config("QWEN_MODEL", "qwen-plus"),        # 使用plus版本
+            "ollama": get_config("OLLAMA_MODEL", "llama3.1")      # 使用更新版本
+        }
+        return optimal_models.get(provider, "default")
+    
+    def _optimize_instruction(self, instruction: Dict[str, Any], page_data: Dict[str, Any], 
+                             context_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """智能指令优化和错误修正"""
+        try:
+            # 1. 基础格式检查和修正
+            instruction = self._fix_basic_format_issues(instruction)
+            
+            # 2. 选择器优化
+            instruction = self._optimize_selectors(instruction, page_data)
+            
+            # 3. 等待时间优化
+            instruction = self._optimize_wait_times(instruction, context_analysis)
+            
+            # 4. 错误处理增强
+            instruction = self._add_error_handling(instruction)
+            
+            # 5. 性能优化
+            instruction = self._optimize_performance(instruction)
+            
+            return instruction
+            
+        except Exception as e:
+            self.logger.warning(f"指令优化失败: {e}")
+            return instruction  # 返回原始指令
+    
+    def _fix_basic_format_issues(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
+        """修复基础格式问题"""
+        # 确保必要字段存在
+        if "steps" in instruction:
+            for i, step in enumerate(instruction["steps"]):
+                # 确保每个步骤都有description
+                if "description" not in step:
+                    step["description"] = f"执行 {step.get('action', 'unknown')} 操作"
+                
+                # 修复常见的action名称错误
+                if "action" in step:
+                    step["action"] = self._normalize_action_name(step["action"])
+        
+        elif "action" in instruction:
+            # 单步指令
+            if "description" not in instruction:
+                instruction["description"] = f"执行 {instruction['action']} 操作"
+            
+            instruction["action"] = self._normalize_action_name(instruction["action"])
+        
+        return instruction
+    
+    def _normalize_action_name(self, action: str) -> str:
+        """标准化action名称"""
+        action_mapping = {
+            "goto": "navigate",
+            "visit": "navigate", 
+            "open": "navigate",
+            "type": "fill",
+            "input": "fill",
+            "press": "key",
+            "keypress": "key",
+            "capture": "screenshot",
+            "save": "screenshot",
+            "extract_data": "extract_results",
+            "get_data": "extract_results"
+        }
+        return action_mapping.get(action.lower(), action)
+    
+    def _optimize_selectors(self, instruction: Dict[str, Any], page_data: Dict[str, Any]) -> Dict[str, Any]:
+        """优化选择器，提供备选方案"""
+        if not page_data:
+            return instruction
+        
+        def optimize_step_selectors(step):
+            if "selector" in step and step["selector"]:
+                # 为选择器添加备选方案
+                primary_selector = step["selector"]
+                fallback_selectors = self._generate_fallback_selectors(primary_selector, step.get("action"))
+                
+                if fallback_selectors:
+                    step["fallback_selectors"] = fallback_selectors
+            
+            return step
+        
+        if "steps" in instruction:
+            instruction["steps"] = [optimize_step_selectors(step) for step in instruction["steps"]]
+        elif "selector" in instruction:
+            instruction = optimize_step_selectors(instruction)
+        
+        return instruction
+    
+    def _generate_fallback_selectors(self, primary_selector: str, action: str) -> List[str]:
+        """为主选择器生成备选选择器"""
+        fallbacks = []
+        
+        # 基于action类型生成通用备选选择器
+        if action == "fill":
+            fallbacks.extend([
+                "input[type='text']:visible:first",
+                "input[type='search']:visible:first", 
+                "textarea:visible:first",
+                "[contenteditable='true']:visible:first"
+            ])
+        elif action == "click":
+            fallbacks.extend([
+                "button:visible:first",
+                "a:visible:first",
+                "[role='button']:visible:first",
+                "input[type='submit']:visible:first"
+            ])
+        elif action == "select":
+            fallbacks.extend([
+                "select:visible:first",
+                "[role='combobox']:visible:first"
+            ])
+        
+        # 移除与主选择器相同的备选项
+        return [f for f in fallbacks if f != primary_selector]
+    
+    def _optimize_wait_times(self, instruction: Dict[str, Any], context_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """优化等待时间"""
+        # 基于页面类型和网络条件调整等待时间
+        base_wait = 2000
+        
+        # 根据上下文调整
+        if context_analysis.get("needs_navigation"):
+            base_wait = 3000  # 导航需要更长等待时间
+        
+        if context_analysis.get("search_intent"):
+            base_wait = 2500  # 搜索操作需要中等等待时间
+        
+        def adjust_wait_times(step):
+            if step.get("action") == "wait" and "value" in step:
+                current_wait = step["value"]
+                if isinstance(current_wait, (int, float)) and current_wait < 1000:
+                    step["value"] = max(current_wait, base_wait)
+            return step
+        
+        if "steps" in instruction:
+            instruction["steps"] = [adjust_wait_times(step) for step in instruction["steps"]]
+        elif instruction.get("action") == "wait":
+            instruction = adjust_wait_times(instruction)
+        
+        return instruction
+    
+    def _add_error_handling(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
+        """为指令添加错误处理机制"""
+        def add_error_handling_to_step(step):
+            # 为关键操作添加超时设置
+            if step.get("action") in ["click", "fill", "select", "wait"]:
+                if "timeout" not in step:
+                    step["timeout"] = 10000  # 10秒超时
+            
+            # 为导航操作添加重试机制
+            if step.get("action") == "navigate":
+                if "retry_count" not in step:
+                    step["retry_count"] = 2
+            
+            return step
+        
+        if "steps" in instruction:
+            instruction["steps"] = [add_error_handling_to_step(step) for step in instruction["steps"]]
+        else:
+            instruction = add_error_handling_to_step(instruction)
+        
+        return instruction
+    
+    def _optimize_performance(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
+        """性能优化"""
+        # 合并连续的等待操作
+        if "steps" in instruction:
+            optimized_steps = []
+            i = 0
+            while i < len(instruction["steps"]):
+                step = instruction["steps"][i]
+                
+                # 检查是否为等待操作
+                if step.get("action") == "wait" and i + 1 < len(instruction["steps"]):
+                    next_step = instruction["steps"][i + 1]
+                    if next_step.get("action") == "wait":
+                        # 合并等待时间
+                        total_wait = step.get("value", 0) + next_step.get("value", 0)
+                        merged_step = {
+                            "action": "wait",
+                            "value": total_wait,
+                            "description": f"等待 {total_wait}ms (合并优化)"
+                        }
+                        optimized_steps.append(merged_step)
+                        i += 2  # 跳过下一个步骤
+                        continue
+                
+                optimized_steps.append(step)
+                i += 1
+            
+            instruction["steps"] = optimized_steps
+        
+        return instruction
+    
+    def _apply_task_decomposition(self, instruction: Dict[str, Any], 
+                                 context_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """应用任务分解策略"""
+        # 检查是否需要任务分解
+        if not self._needs_task_decomposition(instruction, context_analysis):
+            return instruction
+        
+        # 复杂任务分解
+        if context_analysis.get("interaction_type") == "search" and context_analysis.get("needs_navigation"):
+            return self._decompose_search_task(instruction, context_analysis)
+        
+        # 表单填写任务分解
+        if "form" in str(instruction).lower():
+            return self._decompose_form_task(instruction)
+        
+        return instruction
+    
+    def _needs_task_decomposition(self, instruction: Dict[str, Any], 
+                                 context_analysis: Dict[str, Any]) -> bool:
+        """判断是否需要任务分解"""
+        # 如果已经是多步指令，检查复杂度
+        if "steps" in instruction:
+            return len(instruction["steps"]) > 5  # 超过5步考虑分解
+        
+        # 检查是否包含复杂操作
+        complex_patterns = [
+            context_analysis.get("needs_navigation") and context_analysis.get("search_intent"),
+            "form" in str(instruction).lower() and "submit" in str(instruction).lower(),
+            context_analysis.get("interaction_type") == "automation"
+        ]
+        
+        return any(complex_patterns)
+    
+    def _decompose_search_task(self, instruction: Dict[str, Any], 
+                              context_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        """分解搜索任务"""
+        if "steps" not in instruction:
+            return instruction
+        
+        # 将搜索任务分解为：导航 -> 搜索 -> 结果处理
+        steps = instruction["steps"]
+        decomposed_steps = []
+        
+        # 阶段1：导航和页面准备
+        nav_steps = [s for s in steps if s.get("action") in ["navigate", "wait"]]
+        if nav_steps:
+            decomposed_steps.extend(nav_steps)
+            decomposed_steps.append({
+                "action": "wait",
+                "value": 1000,
+                "description": "阶段1完成：页面导航就绪"
+            })
+        
+        # 阶段2：搜索操作
+        search_steps = [s for s in steps if s.get("action") in ["fill", "click", "key"]]
+        if search_steps:
+            decomposed_steps.extend(search_steps)
+            decomposed_steps.append({
+                "action": "wait", 
+                "value": 2000,
+                "description": "阶段2完成：搜索执行完毕"
+            })
+        
+        # 阶段3：结果处理
+        result_steps = [s for s in steps if s.get("action") in ["extract_results", "screenshot"]]
+        if result_steps:
+            decomposed_steps.extend(result_steps)
+        
+        instruction["steps"] = decomposed_steps
+        instruction["task_decomposition"] = {
+            "enabled": True,
+            "phases": ["navigation", "search", "results"],
+            "description": "任务已分解为3个阶段执行"
+        }
+        
+        return instruction
+    
+    def _decompose_form_task(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
+        """分解表单填写任务"""
+        if "steps" not in instruction:
+            return instruction
+        
+        steps = instruction["steps"]
+        decomposed_steps = []
+        
+        # 阶段1：表单定位和准备
+        prep_steps = [s for s in steps if s.get("action") in ["navigate", "wait", "click"] 
+                     and "form" not in s.get("description", "").lower()]
+        if prep_steps:
+            decomposed_steps.extend(prep_steps)
+        
+        # 阶段2：表单填写
+        fill_steps = [s for s in steps if s.get("action") in ["fill", "select"]]
+        if fill_steps:
+            decomposed_steps.extend(fill_steps)
+            decomposed_steps.append({
+                "action": "wait",
+                "value": 1000, 
+                "description": "表单填写完成，准备提交"
+            })
+        
+        # 阶段3：表单提交
+        submit_steps = [s for s in steps if s.get("action") in ["click", "key"] 
+                       and any(word in s.get("description", "").lower() 
+                              for word in ["提交", "submit", "确认"])]
+        if submit_steps:
+            decomposed_steps.extend(submit_steps)
+        
+        instruction["steps"] = decomposed_steps
+        instruction["task_decomposition"] = {
+            "enabled": True,
+            "phases": ["preparation", "filling", "submission"],
+            "description": "表单任务已分解为3个阶段执行"
+        }
+        
         return instruction

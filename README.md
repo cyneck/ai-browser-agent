@@ -156,48 +156,54 @@ ai-browser-agent/
    已完成搜索，找到约100个结果。
    ```
 
-## **7. 开发指南**
+## **7. 文档和指南**
 
-### **7.1 开发环境设置**
+### **7.1 完整文档**
+
+- **[使用指南](./docs/usage_guide.md)** - 详细的使用说明和示例
+- **[API文档](./docs/api_documentation.md)** - 完整的API接口文档
+- **[开发者指南](./docs/developer_guide.md)** - 开发环境设置和贡献指南
+- **[部署指南](./docs/deployment_guide.md)** - 生产环境部署和运维
+- **[架构设计](./docs/architecture.md)** - 系统架构和技术细节
+
+### **7.2 快速链接**
+
+- **API交互文档**: http://localhost:8000/docs (启动服务后访问)
+- **项目结构**: [docs/project_structure.md](./docs/project_structure.md)
+- **测试指南**: [docs/testing_guide.md](./docs/testing_guide.md)
+- **安全设计**: [docs/security_design.md](./docs/security_design.md)
+
+## **8. 开发和贡献**
+
+### **8.1 快速开发设置**
 
 ```bash
+# 克隆仓库
+git clone https://github.com/cyneck/ai-browser-agent.git
+cd ai-browser-agent
+
 # 安装开发依赖
 poetry install --with dev
 
 # 安装pre-commit钩子
 pre-commit install
-```
 
-### **7.2 运行测试**
-
-```bash
-# 运行所有测试
+# 运行测试
 pytest
 
-# 运行特定测试
-pytest tests/unit/test_perception.py
+# 启动开发服务器
+python -m src.main --dev
 ```
 
-### **7.3 代码风格**
+### **8.2 贡献流程**
 
-本项目使用Black和isort进行代码格式化，使用mypy进行类型检查。
+详细的贡献指南请参考 [CONTRIBUTING.md](./CONTRIBUTING.md)
 
-```bash
-# 格式化代码
-black src tests
-isort src tests
-
-# 类型检查
-mypy src
-```
-
-## **8. 贡献指南**
-
-1. Fork仓库
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add some amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建Pull Request
+1. Fork仓库并创建功能分支
+2. 按照代码规范开发功能
+3. 添加测试并确保通过
+4. 更新相关文档
+5. 提交Pull Request
 
 ## **9. 许可证**
 

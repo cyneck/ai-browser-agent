@@ -23,6 +23,7 @@ from src.common.logger import get_logger
 from src.common.performance_monitor import get_performance_monitor
 from src.action.state_manager import StateManager
 from src.action.error_handler import ErrorHandler
+from src.action.error_integration import get_integrated_error_handler
 from src.action.safety_validator import SafetyValidator
 from src.action.human_behavior_simulator import HumanBehaviorSimulator
 from src.common.config import get_config
@@ -46,6 +47,7 @@ class ActionExecutor:
         self.page = page
         self.state_manager = state_manager or StateManager()
         self.error_handler = error_handler or ErrorHandler()
+        self.integrated_error_handler = get_integrated_error_handler()
         self.perf_monitor = get_performance_monitor()
         self.behavior_simulator = HumanBehaviorSimulator(behavior_config)
         self.debug_mode = get_config("DEBUG_MODE", False)
@@ -73,6 +75,19 @@ class ActionExecutor:
             ActionType.SMART_SUBMIT: self._execute_smart_submit,
             ActionType.SAVE_AS_PDF: self._execute_save_as_pdf,
             ActionType.SAVE_AS_MHTML: self._execute_save_as_mhtml,
+            # New enhanced action handlers
+            ActionType.DRAG_AND_DROP: self._execute_drag_and_drop,
+            ActionType.RIGHT_CLICK: self._execute_right_click,
+            ActionType.DOUBLE_CLICK: self._execute_double_click,
+            ActionType.HOVER: self._execute_hover,
+            ActionType.UPLOAD_FILE: self._execute_upload_file,
+            ActionType.DOWNLOAD_FILE: self._execute_download_file,
+            ActionType.SWITCH_TAB: self._execute_switch_tab,
+            ActionType.NEW_TAB: self._execute_new_tab,
+            ActionType.CLOSE_TAB: self._execute_close_tab,
+            ActionType.ZOOM: self._execute_zoom,
+            ActionType.FULLSCREEN: self._execute_fullscreen,
+            ActionType.SMART_WAIT: self._execute_smart_wait,
         }
         
         self.safety_validator = SafetyValidator([action.value for action in ActionType])
@@ -108,6 +123,9 @@ class ActionExecutor:
             self.logger.info("=" * 60)
             self.logger.info(f"执行指令: {json.dumps(instruction, ensure_ascii=False, indent=2)}")
             self.logger.info("=" * 60)
+            
+            # 应用反检测措施
+            self.behavior_simulator.apply_anti_detection_measures(self.page)
 
             # 优化：对于直接明确的指令，跳过LLM调用
             action_str = instruction.get("action")
@@ -146,7 +164,13 @@ class ActionExecutor:
 
             return self._execute_steps(instruction, timeout)
         except Exception as e:
-            return self.error_handler.handle_error(e, instruction, {"session_state": session_state})
+            # 使用集成错误处理器，支持自动恢复
+            return self.integrated_error_handler.handle_error_with_recovery(
+                e, instruction, 
+                {"session_state": session_state, "page_url": self.page.url},
+                executor_callback=lambda recovery_instruction: self.execute(recovery_instruction, session_state),
+                auto_recovery=True
+            )
 
     def _normalize_to_multi_step(self, instruction: Dict[str, Any]) -> Dict[str, Any]:
         """将单步指令标准化为多步格式"""
@@ -336,7 +360,9 @@ class ActionExecutor:
         except Exception as e:
             error_message = f"保存MHTML失败: {e}"
             self.logger.error(error_message)
-            return self.error_handler.handle_error(e, step, {"path": path})
+            return self.integrated_error_handler.handle_error_with_recovery(
+                e, step, {"path": path, "page_url": self.page.url}, auto_recovery=False
+            )
 
     def _execute_save_as_pdf(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """将当前页面保存为PDF"""
@@ -369,7 +395,9 @@ class ActionExecutor:
         except PlaywrightError as e:
             error_message = f"保存PDF失败: {e}"
             self.logger.error(error_message)
-            return self.error_handler.handle_error(e, step, {"path": path})
+            return self.integrated_error_handler.handle_error_with_recovery(
+                e, step, {"path": path, "page_url": self.page.url}, auto_recovery=False
+            )
 
     def _execute_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
         """执行单个步骤"""
@@ -459,7 +487,9 @@ class ActionExecutor:
                 False, 
                 execution_time
             )
-            return self.error_handler.handle_error(e, step, {})
+            return self.integrated_error_handler.handle_error_with_recovery(
+                e, step, {"page_url": self.page.url}, auto_recovery=False
+            )
             
         except Exception as e:
             execution_time = time.time() - start_time
@@ -477,7 +507,9 @@ class ActionExecutor:
                 False, 
                 execution_time
             )
-            return self.error_handler.handle_error(e, step, {})
+            return self.integrated_error_handler.handle_error_with_recovery(
+                e, step, {"page_url": self.page.url}, auto_recovery=False
+            )
 
     # --- Action Handler Methods ---
 
@@ -645,6 +677,7 @@ class ActionExecutor:
             }
 
     def _execute_scroll(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行滚动操作，支持惯性模拟"""
         if "selector" in step:
             self.page.locator(step["selector"]).scroll_into_view_if_needed()
             # 滚动后等待
@@ -653,18 +686,20 @@ class ActionExecutor:
                 time.sleep(scroll_delay)
             return {"success": True, "message": f"成功滚动到元素 {step['selector']}"}
         elif "value" in step:
-            self.page.evaluate(f"window.scrollBy(0, {step['value']})")
-            # 滚动后等待
-            scroll_delay = self.behavior_simulator.get_base_delay() * 0.3
-            if scroll_delay > 0:
-                time.sleep(scroll_delay)
+            # 使用增强的惯性滚动
+            scroll_value = step["value"]
+            direction = "down" if scroll_value > 0 else "up"
+            distance = abs(scroll_value)
+            
+            self.behavior_simulator.simulate_scroll_with_momentum(
+                self.page, direction, distance
+            )
             return {"success": True, "message": f"成功滚动页面 {step['value']} 像素"}
         else:
-            self.page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-            # 滚动后等待
-            scroll_delay = self.behavior_simulator.get_base_delay() * 0.5
-            if scroll_delay > 0:
-                time.sleep(scroll_delay)
+            # 滚动到底部，使用惯性模拟
+            self.behavior_simulator.simulate_scroll_with_momentum(
+                self.page, "down", 1000
+            )
             return {"success": True, "message": "成功滚动到页面底部"}
 
     def _execute_back(self, step: Dict[str, Any]) -> Dict[str, Any]:
@@ -1091,7 +1126,7 @@ class ActionExecutor:
     
     def get_behavior_stats(self) -> Dict[str, Any]:
         """获取人类行为模拟统计信息"""
-        return self.behavior_simulator.get_stats()
+        return self.behavior_simulator.get_enhanced_stats()
         
     def configure_behavior(self, config: Dict[str, Any]) -> None:
         """配置人类行为模拟参数"""
@@ -1103,3 +1138,375 @@ class ActionExecutor:
             **self.behavior_simulator.config
         }
         self.behavior_simulator._apply_behavior_mode()
+        
+    def adjust_behavior_for_detection(self, detection_level: str) -> None:
+        """
+        根据检测级别调整行为模拟
+        
+        Args:
+            detection_level: 检测级别 ("low", "medium", "high")
+        """
+        self.behavior_simulator.adjust_behavior_based_on_detection(detection_level)
+
+    # --- Enhanced Action Handler Methods ---
+
+    def _execute_drag_and_drop(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行拖拽操作"""
+        source_selector = step.get("source_selector") or step.get("selector")
+        target_selector = step.get("target_selector") or step.get("value")
+        
+        if not source_selector or not target_selector:
+            return {"success": False, "message": "拖拽失败：缺少源选择器或目标选择器"}
+        
+        try:
+            source_element = self._find_element_with_fallback(source_selector)
+            target_element = self._find_element_with_fallback(target_selector)
+            
+            if not source_element or not target_element:
+                return {"success": False, "message": "拖拽失败：找不到源元素或目标元素"}
+            
+            # 获取元素位置
+            source_box = source_element.bounding_box()
+            target_box = target_element.bounding_box()
+            
+            if not source_box or not target_box:
+                return {"success": False, "message": "拖拽失败：无法获取元素位置"}
+            
+            # 计算中心点
+            source_x = source_box["x"] + source_box["width"] / 2
+            source_y = source_box["y"] + source_box["height"] / 2
+            target_x = target_box["x"] + target_box["width"] / 2
+            target_y = target_box["y"] + target_box["height"] / 2
+            
+            # 执行拖拽操作
+            self.page.mouse.move(source_x, source_y)
+            self.page.mouse.down()
+            
+            # 模拟自然的拖拽移动
+            if self.behavior_simulator.is_enabled():
+                self.behavior_simulator.simulate_mouse_movement(
+                    self.page, (int(source_x), int(source_y)), (int(target_x), int(target_y))
+                )
+            else:
+                self.page.mouse.move(target_x, target_y)
+            
+            self.page.mouse.up()
+            
+            return {
+                "success": True, 
+                "message": f"成功将元素从 {source_selector} 拖拽到 {target_selector}"
+            }
+            
+        except Exception as e:
+            return {"success": False, "message": f"拖拽操作失败: {str(e)}"}
+
+    def _execute_right_click(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行右键点击操作"""
+        selector = step.get("selector")
+        if not selector:
+            return {"success": False, "message": "右键点击失败：选择器为空"}
+        
+        try:
+            element = self._find_element_with_fallback(selector)
+            if not element:
+                return {"success": False, "message": f"右键点击失败：找不到元素 {selector}"}
+            
+            element.click(button="right")
+            return {"success": True, "message": f"成功右键点击元素 {selector}"}
+            
+        except Exception as e:
+            return {"success": False, "message": f"右键点击失败: {str(e)}"}
+
+    def _execute_double_click(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行双击操作"""
+        selector = step.get("selector")
+        if not selector:
+            return {"success": False, "message": "双击失败：选择器为空"}
+        
+        try:
+            element = self._find_element_with_fallback(selector)
+            if not element:
+                return {"success": False, "message": f"双击失败：找不到元素 {selector}"}
+            
+            element.dblclick()
+            return {"success": True, "message": f"成功双击元素 {selector}"}
+            
+        except Exception as e:
+            return {"success": False, "message": f"双击失败: {str(e)}"}
+
+    def _execute_hover(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行悬停操作"""
+        selector = step.get("selector")
+        if not selector:
+            return {"success": False, "message": "悬停失败：选择器为空"}
+        
+        try:
+            element = self._find_element_with_fallback(selector)
+            if not element:
+                return {"success": False, "message": f"悬停失败：找不到元素 {selector}"}
+            
+            element.hover()
+            
+            # 悬停后等待
+            hover_delay = self.behavior_simulator.get_base_delay() * 0.5
+            if hover_delay > 0:
+                time.sleep(hover_delay)
+            
+            return {"success": True, "message": f"成功悬停在元素 {selector}"}
+            
+        except Exception as e:
+            return {"success": False, "message": f"悬停失败: {str(e)}"}
+
+    def _execute_upload_file(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行文件上传操作"""
+        selector = step.get("selector")
+        file_path = step.get("file_path") or step.get("value")
+        
+        if not selector:
+            return {"success": False, "message": "文件上传失败：选择器为空"}
+        if not file_path:
+            return {"success": False, "message": "文件上传失败：文件路径为空"}
+        
+        try:
+            # 检查文件是否存在
+            if not os.path.exists(file_path):
+                return {"success": False, "message": f"文件上传失败：文件不存在 {file_path}"}
+            
+            element = self._find_element_with_fallback(selector)
+            if not element:
+                return {"success": False, "message": f"文件上传失败：找不到文件输入元素 {selector}"}
+            
+            # 设置文件
+            element.set_input_files(file_path)
+            
+            return {
+                "success": True, 
+                "message": f"成功上传文件 {file_path} 到 {selector}"
+            }
+            
+        except Exception as e:
+            return {"success": False, "message": f"文件上传失败: {str(e)}"}
+
+    def _execute_download_file(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行文件下载操作"""
+        selector = step.get("selector")
+        download_path = step.get("download_path") or "./downloads"
+        
+        if not selector:
+            return {"success": False, "message": "文件下载失败：选择器为空"}
+        
+        try:
+            # 确保下载目录存在
+            os.makedirs(download_path, exist_ok=True)
+            
+            # 监听下载事件
+            with self.page.expect_download() as download_info:
+                element = self._find_element_with_fallback(selector)
+                if not element:
+                    return {"success": False, "message": f"文件下载失败：找不到下载链接 {selector}"}
+                
+                element.click()
+            
+            download = download_info.value
+            
+            # 保存文件
+            file_name = download.suggested_filename
+            file_path = os.path.join(download_path, file_name)
+            download.save_as(file_path)
+            
+            return {
+                "success": True, 
+                "message": f"成功下载文件到 {file_path}",
+                "file_path": file_path,
+                "file_name": file_name
+            }
+            
+        except Exception as e:
+            return {"success": False, "message": f"文件下载失败: {str(e)}"}
+
+    def _execute_switch_tab(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行切换标签页操作"""
+        tab_index = step.get("tab_index")
+        tab_url = step.get("tab_url") or step.get("value")
+        
+        try:
+            context = self.page.context
+            pages = context.pages
+            
+            if tab_index is not None:
+                # 按索引切换
+                if 0 <= tab_index < len(pages):
+                    target_page = pages[tab_index]
+                    target_page.bring_to_front()
+                    # 更新当前页面引用
+                    self.page = target_page
+                    return {"success": True, "message": f"成功切换到标签页 {tab_index}"}
+                else:
+                    return {"success": False, "message": f"标签页索引 {tab_index} 超出范围"}
+            
+            elif tab_url:
+                # 按URL切换
+                for page in pages:
+                    if tab_url in page.url:
+                        page.bring_to_front()
+                        self.page = page
+                        return {"success": True, "message": f"成功切换到包含URL {tab_url} 的标签页"}
+                
+                return {"success": False, "message": f"未找到包含URL {tab_url} 的标签页"}
+            
+            else:
+                return {"success": False, "message": "切换标签页失败：缺少标签页索引或URL"}
+                
+        except Exception as e:
+            return {"success": False, "message": f"切换标签页失败: {str(e)}"}
+
+    def _execute_new_tab(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行新建标签页操作"""
+        url = step.get("url") or step.get("value")
+        
+        try:
+            context = self.page.context
+            new_page = context.new_page()
+            
+            if url:
+                new_page.goto(url, wait_until="domcontentloaded")
+                message = f"成功新建标签页并导航到 {url}"
+            else:
+                message = "成功新建空白标签页"
+            
+            # 切换到新标签页
+            new_page.bring_to_front()
+            self.page = new_page
+            
+            return {"success": True, "message": message}
+            
+        except Exception as e:
+            return {"success": False, "message": f"新建标签页失败: {str(e)}"}
+
+    def _execute_close_tab(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行关闭标签页操作"""
+        tab_index = step.get("tab_index")
+        
+        try:
+            context = self.page.context
+            pages = context.pages
+            
+            if tab_index is not None:
+                # 关闭指定索引的标签页
+                if 0 <= tab_index < len(pages):
+                    target_page = pages[tab_index]
+                    target_page.close()
+                    
+                    # 如果关闭的是当前页面，切换到第一个可用页面
+                    if target_page == self.page and len(pages) > 1:
+                        remaining_pages = [p for p in pages if p != target_page]
+                        if remaining_pages:
+                            self.page = remaining_pages[0]
+                            self.page.bring_to_front()
+                    
+                    return {"success": True, "message": f"成功关闭标签页 {tab_index}"}
+                else:
+                    return {"success": False, "message": f"标签页索引 {tab_index} 超出范围"}
+            else:
+                # 关闭当前标签页
+                self.page.close()
+                return {"success": True, "message": "成功关闭当前标签页"}
+                
+        except Exception as e:
+            return {"success": False, "message": f"关闭标签页失败: {str(e)}"}
+
+    def _execute_zoom(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行页面缩放操作"""
+        zoom_level = step.get("zoom_level") or step.get("value")
+        
+        if zoom_level is None:
+            return {"success": False, "message": "页面缩放失败：缺少缩放级别"}
+        
+        try:
+            # 转换为浮点数
+            zoom_factor = float(zoom_level)
+            
+            # 设置页面缩放
+            self.page.evaluate(f"document.body.style.zoom = '{zoom_factor}'")
+            
+            return {
+                "success": True, 
+                "message": f"成功设置页面缩放为 {zoom_factor}"
+            }
+            
+        except Exception as e:
+            return {"success": False, "message": f"页面缩放失败: {str(e)}"}
+
+    def _execute_fullscreen(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行全屏操作"""
+        enable = step.get("enable", True)
+        
+        try:
+            if enable:
+                # 进入全屏
+                self.page.evaluate("""
+                    if (document.documentElement.requestFullscreen) {
+                        document.documentElement.requestFullscreen();
+                    } else if (document.documentElement.webkitRequestFullscreen) {
+                        document.documentElement.webkitRequestFullscreen();
+                    } else if (document.documentElement.msRequestFullscreen) {
+                        document.documentElement.msRequestFullscreen();
+                    }
+                """)
+                message = "成功进入全屏模式"
+            else:
+                # 退出全屏
+                self.page.evaluate("""
+                    if (document.exitFullscreen) {
+                        document.exitFullscreen();
+                    } else if (document.webkitExitFullscreen) {
+                        document.webkitExitFullscreen();
+                    } else if (document.msExitFullscreen) {
+                        document.msExitFullscreen();
+                    }
+                """)
+                message = "成功退出全屏模式"
+            
+            return {"success": True, "message": message}
+            
+        except Exception as e:
+            return {"success": False, "message": f"全屏操作失败: {str(e)}"}
+
+    def _execute_smart_wait(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """执行智能等待操作"""
+        wait_type = step.get("wait_type", "auto")
+        selector = step.get("selector")
+        timeout = step.get("timeout", 30000)
+        condition = step.get("condition")
+        
+        try:
+            if wait_type == "network_idle":
+                # 等待网络空闲
+                self.page.wait_for_load_state("networkidle", timeout=timeout)
+                return {"success": True, "message": "成功等待网络空闲"}
+                
+            elif wait_type == "element_visible":
+                # 等待元素可见
+                if not selector:
+                    return {"success": False, "message": "智能等待失败：等待元素可见需要选择器"}
+                self.page.wait_for_selector(selector, state="visible", timeout=timeout)
+                return {"success": True, "message": f"成功等待元素 {selector} 可见"}
+                
+            elif wait_type == "element_hidden":
+                # 等待元素隐藏
+                if not selector:
+                    return {"success": False, "message": "智能等待失败：等待元素隐藏需要选择器"}
+                self.page.wait_for_selector(selector, state="hidden", timeout=timeout)
+                return {"success": True, "message": f"成功等待元素 {selector} 隐藏"}
+                
+            elif wait_type == "url_change":
+                # 等待URL变化
+                current_url = self.page.url
+                self.page.wait_for_url(lambda url: url != current_url, timeout=timeout)
+                return {"success": True, "message": "成功等待URL变化"}
+                
+            else:
+                return {"success": False, "message": f"不支持的等待类型: {wait_type}"}
+                
+        except Exception as e:
+            return {"success": False, "message": f"智能等待失败: {str(e)}"}

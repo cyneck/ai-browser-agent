@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-	<title>AI 浏览器代理 - 测试控制台</title>
+	<title>AI 浏览器代理 - 智能控制台</title>
 	<style>
 		:root {
 			--bg: #0f172a;
@@ -12,6 +12,9 @@
 			--text: #e5e7eb;
 			--accent: #22c55e;
 			--danger: #ef4444;
+			--warning: #f59e0b;
+			--info: #3b82f6;
+			--success: #10b981;
 		}
 		* { box-sizing: border-box; }
 		html, body { height: 100%; }
@@ -22,76 +25,224 @@
 			font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", sans-serif;
 		}
 		.container {
-			max-width: 960px;
+			max-width: 1200px;
 			margin: 0 auto;
 			padding: 24px 16px 120px;
+			display: grid;
+			grid-template-columns: 1fr 300px;
+			gap: 24px;
+		}
+		.main-content {
+			min-width: 0;
+		}
+		.sidebar {
+			background: rgba(17, 24, 39, 0.6);
+			border: 1px solid rgba(31, 41, 55, 0.8);
+			backdrop-filter: blur(6px);
+			border-radius: 12px;
+			padding: 16px;
+			height: fit-content;
+			position: sticky;
+			top: 24px;
 		}
 		h1 {
-			font-size: 20px;
+			font-size: 24px;
 			font-weight: 600;
 			margin: 0 0 16px;
+			display: flex;
+			align-items: center;
+			gap: 12px;
+		}
+		.status-indicator {
+			width: 12px;
+			height: 12px;
+			border-radius: 50%;
+			background: var(--success);
+			animation: pulse 2s infinite;
+		}
+		.status-indicator.disconnected {
+			background: var(--danger);
+			animation: none;
+		}
+		@keyframes pulse {
+			0%, 100% { opacity: 1; }
+			50% { opacity: 0.5; }
+		}
+		@media (max-width: 768px) {
+			.container {
+				grid-template-columns: 1fr;
+				gap: 16px;
+			}
+			.sidebar {
+				position: static;
+				order: -1;
+			}
 		}
 		.toolbar {
 			display: flex;
 			gap: 8px;
 			align-items: center;
-			margin-bottom: 12px;
+			margin-bottom: 16px;
+			flex-wrap: wrap;
 		}
 		.toolbar input[type="text"] {
-			flex: 1 1 auto;
+			flex: 1 1 200px;
 			background: #0b1020;
 			border: 1px solid #1f2937;
 			padding: 10px 12px;
 			border-radius: 8px;
 			color: var(--text);
 			outline: none;
+			transition: border-color 0.2s;
 		}
-		.toolbar input[type="text"]:focus { border-color: #374151; }
-		.toolbar .btn {
+		.toolbar input[type="text"]:focus { 
+			border-color: var(--accent); 
+			box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.1);
+		}
+		.btn {
 			background: #111827;
 			border: 1px solid #1f2937;
 			color: var(--text);
-			padding: 10px 12px;
+			padding: 10px 16px;
 			border-radius: 8px;
 			cursor: pointer;
+			transition: all 0.2s;
+			font-size: 14px;
+			font-weight: 500;
+			display: flex;
+			align-items: center;
+			gap: 6px;
 		}
-		.toolbar .btn:hover { border-color: #374151; }
+		.btn:hover { 
+			border-color: #374151; 
+			background: #1f2937;
+		}
+		.btn.primary {
+			background: var(--accent);
+			border-color: var(--accent);
+			color: #0a0a0a;
+		}
+		.btn.primary:hover {
+			background: #16a34a;
+			border-color: #16a34a;
+		}
+		.btn.danger {
+			background: var(--danger);
+			border-color: var(--danger);
+			color: white;
+		}
+		.btn.danger:hover {
+			background: #dc2626;
+			border-color: #dc2626;
+		}
+		.btn:disabled {
+			opacity: 0.5;
+			cursor: not-allowed;
+		}
 		.panel {
 			background: rgba(17, 24, 39, 0.6);
 			border: 1px solid rgba(31, 41, 55, 0.8);
 			backdrop-filter: blur(6px);
 			border-radius: 12px;
-			padding: 12px;
+			padding: 16px;
 		}
 		.messages {
-			height: 60vh;
+			height: 65vh;
 			overflow: auto;
 			display: flex;
 			flex-direction: column;
 			gap: 12px;
 			padding: 8px;
+			scroll-behavior: smooth;
 		}
-		.msg { display: flex; gap: 12px; }
+		.messages::-webkit-scrollbar {
+			width: 6px;
+		}
+		.messages::-webkit-scrollbar-track {
+			background: rgba(31, 41, 55, 0.3);
+			border-radius: 3px;
+		}
+		.messages::-webkit-scrollbar-thumb {
+			background: rgba(148, 163, 184, 0.3);
+			border-radius: 3px;
+		}
+		.messages::-webkit-scrollbar-thumb:hover {
+			background: rgba(148, 163, 184, 0.5);
+		}
+		.msg { 
+			display: flex; 
+			gap: 12px; 
+			animation: fadeIn 0.3s ease-out;
+		}
+		@keyframes fadeIn {
+			from { opacity: 0; transform: translateY(10px); }
+			to { opacity: 1; transform: translateY(0); }
+		}
+		.msg .avatar {
+			width: 32px;
+			height: 32px;
+			border-radius: 50%;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-size: 16px;
+			flex-shrink: 0;
+		}
+		.msg.user .avatar {
+			background: var(--accent);
+			color: #0a0a0a;
+		}
+		.msg.bot .avatar {
+			background: var(--info);
+			color: white;
+		}
+		.msg.error .avatar {
+			background: var(--danger);
+			color: white;
+		}
+		.msg.system .avatar {
+			background: var(--warning);
+			color: #0a0a0a;
+		}
+		.msg .content {
+			flex: 1;
+			min-width: 0;
+		}
 		.msg .bubble {
-			max-width: 80%;
-			padding: 10px 12px;
-			border-radius: 12px;
+			padding: 12px 16px;
+			border-radius: 16px;
 			font-size: 14px;
 			line-height: 1.5;
+			word-wrap: break-word;
+			position: relative;
 		}
 		.msg.user { justify-content: flex-end; }
 		.msg.user .bubble {
 			background: #1f2937;
 			border: 1px solid #374151;
+			border-bottom-right-radius: 4px;
 		}
 		.msg.bot .bubble {
 			background: #0b1020;
 			border: 1px solid #1f2937;
+			border-bottom-left-radius: 4px;
 		}
 		.msg.error .bubble {
 			background: rgba(239, 68, 68, 0.08);
 			border: 1px solid rgba(239, 68, 68, 0.35);
 			color: #fecaca;
+			border-bottom-left-radius: 4px;
+		}
+		.msg.system .bubble {
+			background: rgba(245, 158, 11, 0.08);
+			border: 1px solid rgba(245, 158, 11, 0.35);
+			color: #fbbf24;
+			border-radius: 8px;
+		}
+		.msg .timestamp {
+			font-size: 11px;
+			color: var(--muted);
+			margin-top: 4px;
 		}
 		.screenshot {
 			margin-top: 8px;
@@ -140,21 +291,167 @@
 		.small { color: var(--muted); font-size: 12px; }
 		.kv { display: flex; gap: 8px; align-items: center; }
 		.kv label { color: var(--muted); font-size: 12px; }
+		
+		/* 侧边栏样式 */
+		.sidebar h3 {
+			font-size: 16px;
+			font-weight: 600;
+			margin: 0 0 12px;
+			color: var(--text);
+		}
+		.sidebar .section {
+			margin-bottom: 20px;
+		}
+		.sidebar .section:last-child {
+			margin-bottom: 0;
+		}
+		.status-item {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 8px 0;
+			border-bottom: 1px solid rgba(31, 41, 55, 0.5);
+		}
+		.status-item:last-child {
+			border-bottom: none;
+		}
+		.status-item .label {
+			color: var(--muted);
+			font-size: 13px;
+		}
+		.status-item .value {
+			color: var(--text);
+			font-size: 13px;
+			font-weight: 500;
+		}
+		.history-item {
+			padding: 8px 12px;
+			background: rgba(31, 41, 55, 0.3);
+			border-radius: 6px;
+			margin-bottom: 6px;
+			font-size: 12px;
+			color: var(--muted);
+			cursor: pointer;
+			transition: all 0.2s;
+			border: 1px solid transparent;
+		}
+		.history-item:hover {
+			background: rgba(31, 41, 55, 0.5);
+			border-color: rgba(148, 163, 184, 0.3);
+			color: var(--text);
+		}
+		.history-item:last-child {
+			margin-bottom: 0;
+		}
+		.progress-bar {
+			width: 100%;
+			height: 4px;
+			background: rgba(31, 41, 55, 0.5);
+			border-radius: 2px;
+			overflow: hidden;
+			margin: 8px 0;
+		}
+		.progress-bar .progress {
+			height: 100%;
+			background: var(--accent);
+			width: 0%;
+			transition: width 0.3s ease;
+		}
+		.typing-indicator {
+			display: none;
+			align-items: center;
+			gap: 8px;
+			padding: 12px 16px;
+			background: rgba(17, 24, 39, 0.8);
+			border-radius: 16px;
+			margin: 8px 0;
+		}
+		.typing-indicator.show {
+			display: flex;
+		}
+		.typing-dots {
+			display: flex;
+			gap: 4px;
+		}
+		.typing-dots span {
+			width: 6px;
+			height: 6px;
+			background: var(--muted);
+			border-radius: 50%;
+			animation: typing 1.4s infinite ease-in-out;
+		}
+		.typing-dots span:nth-child(1) { animation-delay: -0.32s; }
+		.typing-dots span:nth-child(2) { animation-delay: -0.16s; }
+		@keyframes typing {
+			0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+			40% { transform: scale(1); opacity: 1; }
+		}
 	</style>
 </head>
 <body>
 	<div class="container">
-		<h1>AI 浏览器代理 · 测试控制台</h1>
-		<div class="toolbar">
-			<div class="kv">
-				<label>会话 ID</label>
-				<input id="sessionId" type="text" placeholder="默认：自动生成" />
+		<div class="main-content">
+			<h1>
+				<span class="status-indicator" id="connectionStatus"></span>
+				AI 浏览器代理 · 智能控制台
+			</h1>
+			<div class="toolbar">
+				<div class="kv">
+					<label>会话 ID</label>
+					<input id="sessionId" type="text" placeholder="自动生成" />
+				</div>
+				<button id="newSessionBtn" class="btn">🆕 新建会话</button>
+				<button id="closeSessionBtn" class="btn danger">🗑️ 关闭会话</button>
+				<button id="clearHistoryBtn" class="btn">🧹 清空历史</button>
 			</div>
-			<button id="newSessionBtn" class="btn">新建会话</button>
-			<button id="closeSessionBtn" class="btn">关闭会话</button>
+			<div class="panel">
+				<div class="typing-indicator" id="typingIndicator">
+					<div class="typing-dots">
+						<span></span>
+						<span></span>
+						<span></span>
+					</div>
+					<span>AI正在思考...</span>
+				</div>
+				<div id="messages" class="messages" aria-live="polite"></div>
+			</div>
 		</div>
-		<div class="panel">
-			<div id="messages" class="messages" aria-live="polite"></div>
+		
+		<div class="sidebar">
+			<div class="section">
+				<h3>📊 会话状态</h3>
+				<div class="status-item">
+					<span class="label">连接状态</span>
+					<span class="value" id="connectionText">已连接</span>
+				</div>
+				<div class="status-item">
+					<span class="label">消息数量</span>
+					<span class="value" id="messageCount">0</span>
+				</div>
+				<div class="status-item">
+					<span class="label">会话时长</span>
+					<span class="value" id="sessionDuration">00:00</span>
+				</div>
+				<div class="status-item">
+					<span class="label">最后活动</span>
+					<span class="value" id="lastActivity">刚刚</span>
+				</div>
+			</div>
+			
+			<div class="section">
+				<h3>⚡ 快捷操作</h3>
+				<button class="btn" style="width: 100%; margin-bottom: 8px;" onclick="quickCommand('截图')">📸 截图</button>
+				<button class="btn" style="width: 100%; margin-bottom: 8px;" onclick="quickCommand('获取页面信息')">📄 页面信息</button>
+				<button class="btn" style="width: 100%; margin-bottom: 8px;" onclick="quickCommand('返回上一页')">⬅️ 后退</button>
+				<button class="btn" style="width: 100%;" onclick="quickCommand('刷新页面')">🔄 刷新</button>
+			</div>
+			
+			<div class="section">
+				<h3>📝 命令历史</h3>
+				<div id="commandHistory" style="max-height: 200px; overflow-y: auto;">
+					<div class="small" style="text-align: center; padding: 20px; color: var(--muted);">暂无历史记录</div>
+				</div>
+			</div>
 		</div>
 	</div>
 
@@ -177,6 +474,19 @@
 			const sessionEl = $("sessionId");
 			const newSessionBtn = $("newSessionBtn");
 			const closeSessionBtn = $("closeSessionBtn");
+			const clearHistoryBtn = $("clearHistoryBtn");
+			const connectionStatus = $("connectionStatus");
+			const connectionText = $("connectionText");
+			const messageCount = $("messageCount");
+			const sessionDuration = $("sessionDuration");
+			const lastActivity = $("lastActivity");
+			const commandHistory = $("commandHistory");
+			const typingIndicator = $("typingIndicator");
+
+			let sessionStartTime = Date.now();
+			let messageCounter = 0;
+			let commandHistoryList = JSON.parse(localStorage.getItem('commandHistory') || '[]');
+			let durationTimer;
 
 			function uuid() {
 				return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -186,7 +496,7 @@
 			}
 
 			function currentSessionId() {
-				return sessionEl.value.trim() || sessionEl.placeholder || uuid();
+				return sessionEl.value.trim() || uuid();
 			}
 
 			function ensureSessionId() {
@@ -200,71 +510,204 @@
 				messagesEl.scrollTop = messagesEl.scrollHeight;
 			}
 
+			function updateConnectionStatus(connected) {
+				if (connected) {
+					connectionStatus.className = 'status-indicator';
+					connectionText.textContent = '已连接';
+				} else {
+					connectionStatus.className = 'status-indicator disconnected';
+					connectionText.textContent = '已断开';
+				}
+			}
+
+			function updateLastActivity() {
+				lastActivity.textContent = new Date().toLocaleTimeString();
+			}
+
+			function updateSessionDuration() {
+				const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+				const minutes = Math.floor(elapsed / 60);
+				const seconds = elapsed % 60;
+				sessionDuration.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+			}
+
+			function addToCommandHistory(command) {
+				if (command.trim() && !commandHistoryList.includes(command)) {
+					commandHistoryList.unshift(command);
+					if (commandHistoryList.length > 10) {
+						commandHistoryList = commandHistoryList.slice(0, 10);
+					}
+					localStorage.setItem('commandHistory', JSON.stringify(commandHistoryList));
+					renderCommandHistory();
+				}
+			}
+
+			function renderCommandHistory() {
+				if (commandHistoryList.length === 0) {
+					commandHistory.innerHTML = '<div class="small" style="text-align: center; padding: 20px; color: var(--muted);">暂无历史记录</div>';
+					return;
+				}
+
+				commandHistory.innerHTML = commandHistoryList.map(cmd => 
+					`<div class="history-item" onclick="useHistoryCommand('${cmd.replace(/'/g, "\\'")}')">${cmd}</div>`
+				).join('');
+			}
+
+			function showTyping() {
+				typingIndicator.classList.add('show');
+			}
+
+			function hideTyping() {
+				typingIndicator.classList.remove('show');
+			}
+
 			function addMessage(role, text, opts = {}) {
 				const div = document.createElement('div');
-				div.className = 'msg ' + role + (opts.error ? ' error' : '');
+				div.className = 'msg ' + role + (opts.error ? ' error' : '') + (opts.system ? ' system' : '');
+				
+				// 添加头像
+				const avatar = document.createElement('div');
+				avatar.className = 'avatar';
+				if (role === 'user') {
+					avatar.textContent = '👤';
+				} else if (role === 'bot') {
+					avatar.textContent = '🤖';
+				} else if (opts.error) {
+					avatar.textContent = '❌';
+				} else if (opts.system) {
+					avatar.textContent = '⚙️';
+				}
+				
+				// 添加内容区域
+				const content = document.createElement('div');
+				content.className = 'content';
+				
 				const bubble = document.createElement('div');
 				bubble.className = 'bubble';
 				bubble.textContent = text;
-				div.appendChild(bubble);
+				
+				const timestamp = document.createElement('div');
+				timestamp.className = 'timestamp';
+				timestamp.textContent = new Date().toLocaleTimeString();
+				
+				content.appendChild(bubble);
+				content.appendChild(timestamp);
+				
+				if (role !== 'user') {
+					div.appendChild(avatar);
+				}
+				div.appendChild(content);
+				if (role === 'user') {
+					div.appendChild(avatar);
+				}
+				
 				if (opts.screenshot) {
 					const img = document.createElement('img');
 					img.className = 'screenshot';
 					img.src = 'data:image/png;base64,' + opts.screenshot;
 					img.alt = 'screenshot';
-					div.appendChild(img);
+					content.appendChild(img);
 				}
+				
 				messagesEl.appendChild(div);
+				messageCounter++;
+				messageCount.textContent = messageCounter;
+				updateLastActivity();
 				scrollToBottom();
 			}
 
-			async function sendInstruction() {
-				const text = inputEl.value.trim();
-				if (!text) return;
+			async function sendInstruction(text = null) {
+				const instruction = text || inputEl.value.trim();
+				if (!instruction) return;
+				
 				const sid = ensureSessionId();
-				addMessage('user', text);
-				inputEl.value = '';
-				const thinkingId = uuid();
-				addMessage('bot', '执行中...', { id: thinkingId });
+				addMessage('user', instruction);
+				addToCommandHistory(instruction);
+				
+				if (!text) {
+					inputEl.value = '';
+				}
+				
+				showTyping();
+				sendBtn.disabled = true;
 
 				try {
 					const res = await fetch('/api/execute', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ text, session_id: sid })
+						body: JSON.stringify({ text: instruction, session_id: sid })
 					});
+					
+					hideTyping();
+					
 					if (!res.ok) throw new Error('HTTP ' + res.status);
 					const data = await res.json();
+					
 					addMessage('bot', data.message || (data.success ? '执行成功' : '执行失败'), {
 						screenshot: data.screenshot
 					});
+					
 					if (!data.success && data.error) {
 						addMessage('bot', '错误: ' + data.error, { error: true });
 					}
+					
+					updateConnectionStatus(true);
 				} catch (e) {
+					hideTyping();
 					addMessage('bot', '请求失败: ' + (e && e.message ? e.message : e), { error: true });
+					updateConnectionStatus(false);
+				} finally {
+					sendBtn.disabled = false;
 				}
 			}
 
 			async function closeSession() {
 				const sid = currentSessionId();
 				if (!sid) return;
+				
 				try {
 					const res = await fetch('/api/sessions/' + encodeURIComponent(sid), { method: 'DELETE' });
 					if (!res.ok) throw new Error('HTTP ' + res.status);
 					const data = await res.json();
-					addMessage('bot', data.message || '会话已关闭');
+					addMessage('system', data.message || '会话已关闭', { system: true });
+					
+					// 重置会话状态
+					sessionEl.value = '';
+					sessionStartTime = Date.now();
+					messageCounter = 0;
+					messageCount.textContent = '0';
 				} catch (e) {
 					addMessage('bot', '关闭会话失败: ' + (e && e.message ? e.message : e), { error: true });
 				}
 			}
 
+			function clearHistory() {
+				messagesEl.innerHTML = '';
+				messageCounter = 0;
+				messageCount.textContent = '0';
+				addMessage('system', '聊天记录已清空', { system: true });
+			}
+
+			function quickCommand(command) {
+				sendInstruction(command);
+			}
+
+			window.useHistoryCommand = function(command) {
+				inputEl.value = command;
+				inputEl.focus();
+			};
+
+			// 事件监听器
 			newSessionBtn.addEventListener('click', () => {
 				sessionEl.value = uuid();
-				addMessage('bot', '已创建新会话: ' + sessionEl.value);
+				sessionStartTime = Date.now();
+				addMessage('system', '已创建新会话: ' + sessionEl.value, { system: true });
 			});
+			
 			closeSessionBtn.addEventListener('click', closeSession);
-			sendBtn.addEventListener('click', sendInstruction);
+			clearHistoryBtn.addEventListener('click', clearHistory);
+			sendBtn.addEventListener('click', () => sendInstruction());
+			
 			inputEl.addEventListener('keydown', (e) => {
 				if (e.key === 'Enter' && !e.shiftKey) {
 					e.preventDefault();
@@ -272,8 +715,28 @@
 				}
 			});
 
-			// 初始欢迎
-			addMessage('bot', '欢迎使用 AI 浏览器代理！请输入自然语言指令开始测试。');
+			// 初始化
+			function init() {
+				updateConnectionStatus(true);
+				renderCommandHistory();
+				
+				// 启动会话时长计时器
+				durationTimer = setInterval(updateSessionDuration, 1000);
+				
+				// 初始欢迎消息
+				addMessage('system', '🎉 欢迎使用 AI 浏览器代理！', { system: true });
+				addMessage('bot', '我是您的智能网页助手，可以帮您执行各种网页操作。请输入自然语言指令开始使用，例如："打开百度并搜索天气"。');
+			}
+
+			// 页面卸载时清理
+			window.addEventListener('beforeunload', () => {
+				if (durationTimer) {
+					clearInterval(durationTimer);
+				}
+			});
+
+			// 启动应用
+			init();
 		})();
 	</script>
 </body>

@@ -35,6 +35,19 @@ class ActionType(Enum):
     SMART_SUBMIT = "smart_submit"
     SAVE_AS_PDF = "save_as_pdf"
     SAVE_AS_MHTML = "save_as_mhtml"
+    # New enhanced action types
+    DRAG_AND_DROP = "drag_and_drop"
+    RIGHT_CLICK = "right_click"
+    DOUBLE_CLICK = "double_click"
+    HOVER = "hover"
+    UPLOAD_FILE = "upload_file"
+    DOWNLOAD_FILE = "download_file"
+    SWITCH_TAB = "switch_tab"
+    NEW_TAB = "new_tab"
+    CLOSE_TAB = "close_tab"
+    ZOOM = "zoom"
+    FULLSCREEN = "fullscreen"
+    SMART_WAIT = "smart_wait"
 
 
 @dataclass

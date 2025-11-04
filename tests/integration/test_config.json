@@ -1,0 +1,35 @@
+{
+  "test_modes": ["integration", "e2e", "ci"],
+  "parallel_execution": true,
+  "max_workers": 4,
+  "timeout": 300,
+  "retry_failed": true,
+  "generate_reports": true,
+  "cleanup_after_test": true,
+  "verbose": true,
+  "browser_config": {
+    "headless": true,
+    "browser_type": "chromium",
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    },
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+  },
+  "test_data": {
+    "mock_success_rate": 0.85,
+    "execution_delay": 0.5,
+    "error_simulation": true
+  },
+  "reporting": {
+    "generate_html": true,
+    "generate_json": true,
+    "include_screenshots": false,
+    "detailed_logs": true
+  },
+  "cleanup": {
+    "remove_temp_files": true,
+    "remove_test_data": true,
+    "clear_browser_cache": true
+  }
+}
