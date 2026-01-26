@@ -284,3 +284,6 @@ development.sqlite
 scratch/
 playground/
 experimental/
+debug
+logs
+.cursor

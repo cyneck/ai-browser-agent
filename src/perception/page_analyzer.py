@@ -27,104 +27,86 @@ class PageAnalyzer:
         self.logger = get_logger()
     
     def analyze(self) -> Dict[str, Any]:
-        """分析页面内容，生成页面意图图谱
-        Returns:
-            Dict[str, Any]: 页面意图图谱，包含页面的结构化信息；若页面为空或未初始化，返回空结构
-        """
+        """分析页面内容，生成页面意图图谱"""
         try:
-            # 先安全获取URL和标题
-            url = ""
-            title = ""
-            try:
-                url = getattr(self.page, "url", "") or ""
-            except Exception:
-                url = ""
-            try:
-                title = self.page.title()
-            except Exception:
-                title = ""
-
-            # 如果是空白页或未初始化，直接返回无效分析
+            url = self._safe_get_url()
+            title = self._safe_get_title()
+            
+            # 如果是空白页，直接返回无效分析
             if not url or url == "about:blank":
-                return {
-                    "is_valid": False,
-                    "url": url,
-                    "title": title or "空白页面",
-                    "elements": [],
-                    "text_content": "",
-                    "functional_areas": [],
-                    "page_type": "blank",
-                    "aria_snapshot": None
-                }
+                return self._create_blank_page_data(url, title)
             
             self.logger.info(f"分析页面: {title} ({url})")
-            
-            # 提取页面元素信息
-            elements_info = self._extract_elements_info()
-            
-            # 提取页面文本内容
-            text_content = self._extract_text_content()
-            
-            # 识别页面主要功能区域
-            functional_areas = self._identify_functional_areas()
-            
-            # 获取轻量 ARIA 快照
-            try:
-                aria_snapshot = self.page.accessibility.snapshot()
-            except Exception:
-                aria_snapshot = None
             
             # 构建页面意图图谱
             page_intent_graph = {
                 "is_valid": True,
                 "url": url,
                 "title": title,
-                "elements": elements_info,
-                "text_content": text_content,
-                "functional_areas": functional_areas,
+                "elements": self._extract_elements_info(),
+                "text_content": self._extract_text_content(),
+                "functional_areas": self._identify_functional_areas(),
                 "page_type": self._determine_page_type(),
-                "aria_snapshot": aria_snapshot
+                "aria_snapshot": self._safe_get_aria_snapshot()
             }
             
             self.logger.info("页面分析完成")
             return page_intent_graph
         except Exception as e:
             self.logger.error(f"分析页面时发生错误: {str(e)}")
-            # 返回基本信息（无效分析）
-            safe_title = ""
-            try:
-                safe_title = self.page.title()
-            except Exception:
-                safe_title = "空白页面"
-            safe_url = ""
-            try:
-                safe_url = getattr(self.page, "url", "") or ""
-            except Exception:
-                safe_url = ""
-            return {
-                "is_valid": False,
-                "url": safe_url,
-                "title": safe_title,
-                "elements": [],
-                "text_content": "",
-                "functional_areas": [],
-                "page_type": "unknown",
-                "aria_snapshot": None,
-                "error": str(e)
-            }
+            return self._create_error_page_data(str(e))
+    
+    def _safe_get_url(self) -> str:
+        """安全获取URL"""
+        try:
+            return getattr(self.page, "url", "") or ""
+        except Exception:
+            return ""
+    
+    def _safe_get_title(self) -> str:
+        """安全获取标题"""
+        try:
+            return self.page.title()
+        except Exception:
+            return "空白页面"
+    
+    def _safe_get_aria_snapshot(self) -> Optional[Dict[str, Any]]:
+        """安全获取ARIA快照"""
+        try:
+            return self.page.accessibility.snapshot()
+        except Exception:
+            return None
+    
+    def _create_blank_page_data(self, url: str, title: str) -> Dict[str, Any]:
+        """创建空白页面数据"""
+        return {
+            "is_valid": False,
+            "url": url,
+            "title": title,
+            "elements": [],
+            "text_content": "",
+            "functional_areas": [],
+            "page_type": "blank",
+            "aria_snapshot": None
+        }
+    
+    def _create_error_page_data(self, error: str) -> Dict[str, Any]:
+        """创建错误页面数据"""
+        return {
+            "is_valid": False,
+            "url": self._safe_get_url(),
+            "title": self._safe_get_title(),
+            "elements": [],
+            "text_content": "",
+            "functional_areas": [],
+            "page_type": "unknown",
+            "aria_snapshot": None,
+            "error": error
+        }
 
     def get_aria_snapshot(self) -> Optional[Dict[str, Any]]:
-        """获取页面的Aria Snapshot
-        Returns:
-            Optional[Dict[str, Any]]: 页面的Aria Snapshot，如果获取失败则返回None
-        """
-        try:
-            snapshot = self.page.accessibility.snapshot()
-            self.logger.info("成功获取Aria Snapshot")
-            return snapshot
-        except Exception as e:
-            self.logger.error(f"获取Aria Snapshot时发生错误: {str(e)}")
-            return None
+        """获取页面的Aria Snapshot"""
+        return self._safe_get_aria_snapshot()
     
     def _extract_elements_info(self) -> List[Dict[str, Any]]:
         """提取页面元素信息
@@ -133,7 +115,7 @@ class PageAnalyzer:
         """
         try:
             elements_info = self.page.evaluate(
-                """
+                r"""
                 () => {
                     // 获取所有可交互元素
                     const interactiveElements = Array.from(document.querySelectorAll(
@@ -215,7 +197,7 @@ class PageAnalyzer:
         """
         try:
             text_content = self.page.evaluate(
-                """
+                r"""
                 () => {
                     // 获取body元素
                     const body = document.body;
@@ -268,32 +250,15 @@ class PageAnalyzer:
         return functional_areas
 
     def _determine_page_type(self) -> str:
-        """根据URL、标题和元素信息判断页面类型
-        Returns:
-            str: 页面类型（如"search_results", "product_page", "article", "generic"等）
-        """
+        """根据URL判断页面类型"""
         try:
-            url = getattr(self.page, "url", "") or ""
-            title = ""
-            try:
-                title = self.page.title()
-            except Exception:
-                title = ""
-            elements_info = self._extract_elements_info()
-            
-            if "search" in url.lower() or "s?wd=" in url.lower() or "q=" in url.lower():
+            url = self._safe_get_url().lower()
+            if "search" in url or "s?wd=" in url or "q=" in url:
                 return "search_results"
-            
-            if "product" in url.lower() or "item" in url.lower() or "detail" in url.lower():
+            if "product" in url or "item" in url or "detail" in url:
                 return "product_page"
-                
-            if "article" in url.lower() or "blog" in url.lower() or "news" in url.lower():
+            if "article" in url or "blog" in url or "news" in url:
                 return "article_page"
-                
-            # 检查是否存在明显的表单元素
-            if any(e.get('type') == 'form' for e in elements_info):
-                return "form_page"
+            return "generic"
         except Exception:
             return "unknown"
-        
-        return "generic"

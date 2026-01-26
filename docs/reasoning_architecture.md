@@ -143,3 +143,6 @@ class LoopController:
 - 对上层调用者保持 `InstructionBuilder.build(user_instruction, page_data, session_state)` 不变。
 - 内部逐步替换为 DialogueManager + TaskPlanner + InstructionGenerator 的编排实现。
 
+
+
+
