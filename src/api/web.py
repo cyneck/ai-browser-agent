@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -83,27 +83,14 @@ class WebInterface:
                     instruction.text,
                     self.session_states[session_id]
                 )
-
-                # 更新会话状态
-                if "session_state" in result:
-                    self.session_states[session_id].update(result["session_state"])
-
-                return ExecutionResult(
-                    success=result.get("success", False),
-                    message=result.get("message", ""),
-                    error=result.get("error"),
-                    screenshot=result.get("screenshot"),
-                    session_id=session_id
-                )
+                self._update_session_state(session_id, result)
+                return self._create_execution_result(result, session_id)
             except Exception as e:
                 self.logger.error(f"执行指令时发生错误: {str(e)}")
                 return ExecutionResult(
-                    success=False,
-                    message="执行失败",
-                    error=str(e),
-                    session_id=session_id
+                    success=False, message="执行失败", error=str(e), session_id=session_id
                 )
-
+    
         @self.app.delete("/api/sessions/{session_id}")
         async def close_session(session_id: str):
             """关闭会话"""
@@ -143,12 +130,7 @@ class WebInterface:
                             instruction,
                             self.session_states[session_id]
                         )
-
-                        # 更新会话状态
-                        if "session_state" in result:
-                            self.session_states[session_id].update(result["session_state"])
-
-                        # 发送结果
+                        self._update_session_state(session_id, result)
                         await websocket.send_json({
                             "type": "result",
                             "success": result.get("success", False),
@@ -158,10 +140,7 @@ class WebInterface:
                         })
                     except Exception as e:
                         self.logger.error(f"执行指令时发生错误: {str(e)}")
-                        await websocket.send_json({
-                            "type": "error",
-                            "message": str(e)
-                        })
+                        await websocket.send_json({"type": "error", "message": str(e)})
             except WebSocketDisconnect:
                 self.logger.info(f"客户端断开连接: {session_id}")
                 if session_id in self.active_connections:
@@ -171,14 +150,42 @@ class WebInterface:
                 if session_id in self.active_connections:
                     del self.active_connections[session_id]
 
-        # 静态文件
+        # 静态文件路由
+        project_root = Path(__file__).resolve().parents[2]
+        static_dir = project_root / "static"
+        
+        @self.app.get("/")
+        async def read_root():
+            """返回首页"""
+            index_file = static_dir / "index.html"
+            if index_file.exists():
+                return FileResponse(index_file)
+            return {"message": "Static files not found", "static_dir": str(static_dir)}
+        
+        # 挂载静态文件目录
         try:
-            project_root = Path(__file__).resolve().parents[2]
-            static_dir = project_root / "static"
-            self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-            self.app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="root")
+            if static_dir.exists():
+                self.app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+                self.logger.info(f"静态文件目录已挂载: {static_dir}")
+            else:
+                self.logger.warning(f"静态文件目录不存在: {static_dir}")
         except Exception as e:
             self.logger.warning(f"挂载静态文件目录失败: {str(e)}")
+    
+    def _update_session_state(self, session_id: str, result: Dict[str, Any]):
+        """更新会话状态"""
+        if "session_state" in result:
+            self.session_states[session_id].update(result["session_state"])
+    
+    def _create_execution_result(self, result: Dict[str, Any], session_id: str) -> ExecutionResult:
+        """创建执行结果"""
+        return ExecutionResult(
+            success=result.get("success", False),
+            message=result.get("message", ""),
+            error=result.get("error"),
+            screenshot=result.get("screenshot"),
+            session_id=session_id
+        )
 
     def start(self, host: str = "127.0.0.1", port: int = 8000):
         """启动Web服务器"""

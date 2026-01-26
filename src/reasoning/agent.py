@@ -178,71 +178,29 @@ class BrowserAgent:
             
             # 1. 分析用户意图
             intent_result = self.intent_classifier.classify_intent(text)
-            self.logger.info(f"识别用户意图: {intent_result.intent_type.value}, 置信度: {intent_result.confidence}")
             
-            # 2. 获取页面数据
-            page_data = {}
-            try:
-                if self.page_analyzer is not None:
-                    analyzed = self.page_analyzer.analyze()
-                    page_data = analyzed if isinstance(analyzed, dict) and analyzed.get("is_valid", True) else {}
-                else:
-                    self.logger.warning("PageAnalyzer未初始化")
-            except Exception as analyze_err:
-                self.logger.warning(f"页面分析失败: {analyze_err}")
-
-            # 3. 构建指令（考虑用户意图）
-            try:
-                if self.instruction_builder is not None:
-                    json_instruction = self.instruction_builder.build_optimized(text, page_data, session_state)
-                    
-                    # 根据用户意图调整指令
-                    json_instruction = self._enhance_instruction_with_intent(json_instruction, intent_result)
-                else:
-                    raise RuntimeError("InstructionBuilder未初始化")
-            except Exception as build_err:
-                self.logger.error(f"构建指令失败: {build_err}")
-                json_instruction = {"action": "error", "error": str(build_err)}
+            # 2. 获取页面数据（失败时使用空字典）
+            page_data = self._get_page_data()
+            
+            # 3. 构建指令
+            json_instruction = self._build_instruction(text, page_data, session_state, intent_result)
             
             # 4. 执行指令
-            if self.action_executor is not None:
-                result = self.action_executor.execute(
-                    json_instruction,
-                    session_state,
-                    timeout=get_config("MAX_EXECUTION_TIME", 120)
-                )
-            else:
-                raise RuntimeError("ActionExecutor未初始化")
-            
-            # 5. 处理执行结果并生成最终响应
-            final_response = self._process_execution_result(
-                result, intent_result, text, session_state
+            result = self.action_executor.execute(
+                json_instruction,
+                session_state,
+                timeout=get_config("MAX_EXECUTION_TIME", 120)
             )
             
+            # 5. 处理执行结果并生成最终响应
+            final_response = self._process_execution_result(result, intent_result, text, session_state)
+            
             # 6. 处理截图
-            screenshot = final_response.get("screenshot")
-            if not screenshot and final_response.get("success", False) and final_response.get("take_screenshot", False):
-                try:
-                    if self.page is not None:
-                        screenshot_bytes = self.page.screenshot()
-                        screenshot = base64.b64encode(screenshot_bytes).decode("utf-8")
-                    else:
-                        self.logger.warning("Page对象未初始化，无法截图")
-                        screenshot = None
-                except Exception:
-                    screenshot = None
+            screenshot = self._get_screenshot(final_response)
             
             # 7. 更新页面数据
-            try:
-                if self.page_analyzer is not None:
-                    updated_page_data = self.page_analyzer.analyze()
-                else:
-                    self.logger.warning("PageAnalyzer未初始化，无法更新页面数据")
-                    updated_page_data = {}
-            except Exception:
-                updated_page_data = {}
-
-            self.logger.info(f"执行完成，成功: {final_response.get('success', False)}")
+            updated_page_data = self._get_page_data()
+            
             return {
                 "success": final_response.get("success", False),
                 "message": final_response.get("message", "执行完成"),
@@ -250,9 +208,9 @@ class BrowserAgent:
                 "screenshot": screenshot,
                 "session_state": session_state,
                 "page_data": updated_page_data,
-                "content": final_response.get("content"),  # 添加内容字段
-                "response_format": final_response.get("response_format", "natural_language"),  # 添加格式字段
-                "intent_info": {  # 添加意图信息
+                "content": final_response.get("content"),
+                "response_format": final_response.get("response_format", "natural_language"),
+                "intent_info": {
                     "intent_type": intent_result.intent_type.value,
                     "confidence": intent_result.confidence,
                     "response_format": intent_result.response_format
@@ -261,6 +219,38 @@ class BrowserAgent:
         except Exception as e:
             self.logger.error(f"执行指令时发生错误: {e}", exc_info=True)
             return {"success": False, "message": "执行失败", "error": str(e), "session_state": session_state}
+    
+    def _get_page_data(self) -> Dict[str, Any]:
+        """获取页面数据，失败时返回空字典"""
+        try:
+            if self.page_analyzer:
+                analyzed = self.page_analyzer.analyze()
+                return analyzed if isinstance(analyzed, dict) and analyzed.get("is_valid", True) else {}
+        except Exception as e:
+            self.logger.debug(f"页面分析失败: {e}")
+        return {}
+    
+    def _build_instruction(self, text: str, page_data: Dict[str, Any], 
+                          session_state: Dict[str, Any], intent_result) -> Dict[str, Any]:
+        """构建指令"""
+        try:
+            json_instruction = self.instruction_builder.build(text, page_data, session_state)
+            return self._enhance_instruction_with_intent(json_instruction, intent_result)
+        except Exception as e:
+            self.logger.error(f"构建指令失败: {e}")
+            return {"action": "error", "error": str(e)}
+    
+    def _get_screenshot(self, final_response: Dict[str, Any]) -> Optional[str]:
+        """获取截图"""
+        screenshot = final_response.get("screenshot")
+        if not screenshot and final_response.get("success") and final_response.get("take_screenshot"):
+            try:
+                if self.page:
+                    screenshot_bytes = self.page.screenshot()
+                    return base64.b64encode(screenshot_bytes).decode("utf-8")
+            except Exception:
+                pass
+        return screenshot
     
     def _enhance_instruction_with_intent(self, instruction: Dict[str, Any], 
                                        intent_result) -> Dict[str, Any]:
@@ -435,33 +425,27 @@ class BrowserAgent:
 
     def get_page_state(self) -> Dict[str, Any]:
         """获取当前页面状态"""
-        if not self.initialized: self.initialize()
+        if not self.initialized:
+            self.initialize()
         self._command_queue.put({"command": "get_page_state"})
         return self._result_queue.get()
 
     def _handle_get_page_state(self) -> Dict[str, Any]:
-        try:
-            if self.page_analyzer is not None:
-                return self.page_analyzer.analyze()
-            else:
-                return {"success": False, "error": "PageAnalyzer未初始化"}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        """处理获取页面状态请求"""
+        return self._get_page_data()
 
     def take_screenshot(self) -> Optional[bytes]:
         """截取当前页面截图"""
-        if not self.initialized: self.initialize()
+        if not self.initialized:
+            self.initialize()
         self._command_queue.put({"command": "take_screenshot"})
         result = self._result_queue.get()
         return result if isinstance(result, bytes) else None
 
     def _handle_take_screenshot(self) -> Optional[bytes]:
+        """处理截图请求"""
         try:
-            if self.page is not None:
-                return self.page.screenshot()
-            else:
-                self.logger.warning("Page对象未初始化，无法截图")
-                return None
+            return self.page.screenshot() if self.page else None
         except Exception:
             return None
 

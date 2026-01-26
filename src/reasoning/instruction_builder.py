@@ -53,116 +53,52 @@ class InstructionBuilder:
         """
         try:
             self.logger.info(f"构建指令: {user_text}")
-
-            # 创建指令上下文
-            instruction_context = InstructionContext(
-                user_text=user_text,
-                page_data=page_data,
-                session_state=session_state
-            )
-
-            # 检查是否有可用的LLM提供商
-            available_providers = self.llm_manager.get_available_providers()
-            if available_providers:
-                # 如果有可用的LLM，优先使用LLM而不是简单启发式规则
-                self.logger.debug("检测到可用的LLM提供商，优先使用LLM")
-                
-                # 提取对话历史
-                conversation_history = session_state.get("conversation_history", [])
-
-                # 构建提示词
-                prompt = self.prompt_manager.build_complete_prompt(
-                    user_text,
-                    page_data,
-                    conversation_history
-                )
-
-                # 调用LLM生成指令
-                json_instruction = self._call_llm(prompt)
-
-                # 验证指令格式
-                validated_instruction = self._validate_instruction(json_instruction, page_data)
-
-                # 更新对话历史
-                conversation_history.append({
-                    "role": "user",
-                    "content": user_text
-                })
-                conversation_history.append({
-                    "role": "assistant",
-                    "content": json.dumps(validated_instruction)
-                })
-
-                # 限制对话历史长度
-                if len(conversation_history) > 10:
-                    conversation_history = conversation_history[-10:]
-
-                # 更新会话状态
-                session_state["conversation_history"] = conversation_history
-
-                self.logger.info("指令构建完成")
-                return validated_instruction
-
-            # 若页面无效/空白，优先从指令中提取 URL 或生成 Bing 搜索前置步骤
-            if not page_data or not page_data.get("is_valid", True) or page_data.get("page_type") == "blank":
-                # 先尝试使用插件管理器的智能回退功能
-                nav_url = self._detect_navigation_intent_and_url(user_text)
-                if nav_url:
-                    fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
-                    if fallback_instruction:
-                        return fallback_instruction
-                
-                nav_only = self._maybe_build_navigation_first(user_text)
-                if nav_only:
-                    return nav_only
-                # 如果没有明确URL，则使用 Bing 前置检索
-                bing_pre_search = self._build_bing_pre_search(user_text)
-                if bing_pre_search:
-                    return bing_pre_search
-
-            # 在已加载页面上，尝试已知站点的启发式动作（如搜索框操作）
-            known = self._maybe_build_known_site_action(user_text, page_data)
-            if known:
-                return known
-
+            
             # 提取对话历史
             conversation_history = session_state.get("conversation_history", [])
-
-            # 构建提示词
-            prompt = self.prompt_manager.build_complete_prompt(
-                user_text,
-                page_data,
-                conversation_history
-            )
-
-            # 调用LLM生成指令
-            json_instruction = self._call_llm(prompt)
-
-            # 验证指令格式
+            
+            # 先尝试简单启发式规则（避免不必要的LLM调用）
+            simple_action = self._try_simple_heuristics(user_text, page_data)
+            if simple_action:
+                self.logger.info("使用简单启发式规则，无需LLM")
+                return simple_action
+            
+            # 检查是否有可用的LLM提供商
+            available_providers = self.llm_manager.get_available_providers()
+            if not available_providers:
+                self.logger.warning("没有可用的LLM提供商，返回错误指令")
+                return {
+                    "action": "error",
+                    "error": "没有配置LLM提供商",
+                    "original_text": user_text
+                }
+            
+            # 使用LLM生成指令
+            self.logger.debug("使用LLM生成指令")
+            context_analysis = self._analyze_context(user_text, page_data, conversation_history)
+            
+            # 尝试使用增强提示词，如果不可用则使用普通提示词
+            try:
+                prompt = self.prompt_manager.build_enhanced_prompt(
+                    user_text, page_data, conversation_history, context_analysis
+                )
+            except AttributeError:
+                prompt = self.prompt_manager.build_complete_prompt(
+                    user_text, page_data, conversation_history
+                )
+            
+            json_instruction = self._call_llm(prompt, user_text)
             validated_instruction = self._validate_instruction(json_instruction, page_data)
-
+            
             # 更新对话历史
-            conversation_history.append({
-                "role": "user",
-                "content": user_text
-            })
-            conversation_history.append({
-                "role": "assistant",
-                "content": json.dumps(validated_instruction)
-            })
-
-            # 限制对话历史长度
-            if len(conversation_history) > 10:
-                conversation_history = conversation_history[-10:]
-
-            # 更新会话状态
+            self._update_conversation_history(conversation_history, user_text, validated_instruction)
             session_state["conversation_history"] = conversation_history
-
+            
             self.logger.info("指令构建完成")
             return validated_instruction
+            
         except Exception as e:
             self.logger.error(f"构建指令时发生错误: {str(e)}")
-            # 返回错误指令
             return {
                 "action": "error",
                 "error": str(e),
@@ -171,178 +107,73 @@ class InstructionBuilder:
 
     def build_optimized(self, user_text: str, page_data: Dict[str, Any], 
                        session_state: Dict[str, Any]) -> Dict[str, Any]:
-        """优化版本：智能构建指令，避免双重LLM调用
-        
-        与普通 build() 方法的区别：
-        1. 更好的上下文感知：分析当前页面状态和用户意图
-        2. 一次性生成完整指令：包括导航+操作的完整流程
-        3. 避免分阶段执行：减少LLM调用次数
-        
-        Args:
-            user_text: 用户输入的自然语言文本
-            page_data: 当前页面的结构化数据
-            session_state: 会话状态，包含对话历史等
-            
-        Returns:
-            Dict[str, Any]: 标准化的JSON格式指令
-        """
-        try:
-            self.logger.info(f"优化构建指令: {user_text}")
-            
-            # 创建指令上下文
-            instruction_context = InstructionContext(
-                user_text=user_text,
-                page_data=page_data,
-                session_state=session_state
-            )
-            
-            # 提取对话历史
-            conversation_history = session_state.get("conversation_history", [])
-            
-            # 检查是否有可用的LLM提供商
-            available_providers = self.llm_manager.get_available_providers()
-            if available_providers:
-                # 如果有可用的LLM，优先使用LLM而不是简单启发式规则
-                self.logger.debug("检测到可用的LLM提供商，优先使用LLM")
-                
-                # 智能上下文分析
-                self.logger.debug("执行智能上下文分析...")
-                context_analysis = self._analyze_context(user_text, page_data, conversation_history)
-                
-                # 构建增强的提示词（一次性生成完整流程）
-                self.logger.debug("构建增强提示词...")
-                enhanced_prompt = self.prompt_manager.build_enhanced_prompt(
-                    user_text, 
-                    page_data, 
-                    conversation_history,
-                    context_analysis
-                )
-                
-                # 单次LLM调用生成完整指令
-                self.logger.debug("调用LLM生成指令...")
-                json_instruction = self._call_llm(enhanced_prompt)
-                
-                # 验证指令格式
-                self.logger.debug("验证指令格式...")
-                validated_instruction = self._validate_instruction(json_instruction, page_data)
-                
-                # 更新对话历史
-                conversation_history.append({
-                    "role": "user",
-                    "content": user_text
-                })
-                conversation_history.append({
-                    "role": "assistant", 
-                    "content": json.dumps(validated_instruction)
-                })
-                
-                # 限制对话历史长度
-                if len(conversation_history) > 10:
-                    conversation_history = conversation_history[-10:]
-                
-                # 更新会话状态
-                session_state["conversation_history"] = conversation_history
-                
-                self.logger.info("优化指令构建完成")
-                return validated_instruction
-            
-            # 如果没有可用的LLM提供商，则使用简单启发式规则
-            self.logger.debug("未检测到可用的LLM提供商，使用简单启发式规则")
-            simple_action = self._try_simple_heuristics(user_text, page_data)
-            if simple_action:
-                self.logger.info("使用简单启发式规则，无需LLM")
-                return simple_action
-            
-        except Exception as e:
-            self.logger.error(f"优化构建指令时发生错误: {str(e)}")
-            # 错误时降级到普通构建方法
-            self.logger.warning("降级到普通构建方法")
-            return self.build(user_text, page_data, session_state)
+        """优化版本：与build()方法相同，保持向后兼容"""
+        return self.build(user_text, page_data, session_state)
+    
+    def _update_conversation_history(self, conversation_history: List[Dict[str, str]], 
+                                    user_text: str, instruction: Dict[str, Any]):
+        """更新对话历史"""
+        conversation_history.append({"role": "user", "content": user_text})
+        conversation_history.append({"role": "assistant", "content": json.dumps(instruction)})
+        # 限制对话历史长度
+        if len(conversation_history) > 10:
+            conversation_history[:] = conversation_history[-10:]
 
     def _try_simple_heuristics(self, user_text: str, page_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """尝试简单的启发式规则，避免不必要的LLM调用"""
-        self.logger.debug(f"_try_simple_heuristics: 进入方法，用户输入: {user_text}")
-        
-        # 检查是否是询问当前页面的意图
+        # 1. 当前页面查询
         if self._is_current_page_query(user_text):
-            self.logger.debug(f"_try_simple_heuristics: 检测到当前页面查询意图")
-            return {
-                "action": "extract_results",
-                "extraction_type": "auto",
-                "description": "提取当前页面信息"
-            }
+            return {"action": "extract_results", "extraction_type": "auto", "description": "提取当前页面信息"}
         
+        # 2. 导航意图
         nav_url = self._detect_navigation_intent_and_url(user_text)
-        self.logger.debug(f"_try_simple_heuristics: 检测到的导航 URL: {nav_url}")
-
-        # 使用插件管理器的智能回退功能处理所有网站限制
-        # 但如果是小红书且设置了直接访问，则跳过回退策略
         if nav_url:
-            # 检查是否是小红书并且设置了直接访问
+            # 尝试插件回退策略（除非是小红书且设置了直接访问）
             is_xiaohongshu = "xiaohongshu.com" in nav_url
             direct_access = get_config("XIAOHONGSHU_DIRECT_ACCESS", "false").lower() == "true"
-            
             if not (is_xiaohongshu and direct_access):
-                self.logger.debug(f"_try_simple_heuristics: 尝试插件管理器回退策略")
-                fallback_instruction = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
-                if fallback_instruction:
-                    self.logger.debug(f"_try_simple_heuristics: 插件管理器返回指令")
-                    return fallback_instruction
+                fallback = self.plugin_manager.build_instruction_with_fallback(user_text, nav_url)
+                if fallback:
+                    return fallback
+            return {"action": "navigate", "value": nav_url, "description": f"导航到 {nav_url}"}
         
-        # 如果有导航意图，生成导航指令，无论当前页面是否有效
-        if nav_url:
-            return {
-                "action": "navigate",
-                "value": nav_url,
-                "description": f"导航到 {nav_url}"
-            }
-
-        # 新增逻辑：如果无导航意图，但有搜索意图，且当前页面为空，则默认使用优先级搜索引擎搜索
-        if not nav_url and self._intent_is_search(user_text) and (not page_data or not page_data.get("is_valid", True)):
-            self.logger.debug(f"_try_simple_heuristics: 构建优化的搜索引擎搜索指令")
-            search_keywords = self._extract_search_keywords(user_text)
-            self.logger.debug(f"_try_simple_heuristics: 提取的搜索关键词: {search_keywords}")
-            
-            # 使用搜索引擎优先级配置
-            from src.common.search_engines import get_primary_search_engine
-            primary_engine = get_primary_search_engine()
-            
-            # 构建搜索步骤
-            steps = [
-                {"action": "navigate", "value": primary_engine["url"], "description": f"导航到{primary_engine['display_name']}首页"},
-                {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
-                {"action": "wait", "selector": primary_engine["search_box_selector"], "timeout": 5000, "description": f"等待{primary_engine['display_name']}搜索框加载"},
-                {"action": "fill", "selector": primary_engine["search_box_selector"], "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
-            ]
-            
-            # 根据搜索引擎的推荐提交方式添加步骤
-            if primary_engine["submit_method"] == "enter_key":
-                steps.append({"action": "key", "selector": primary_engine["search_box_selector"], "value": "Enter", "description": "按回车键执行搜索"})
-            else:
-                # 百度使用点击按钮的方式
-                steps.append({"action": "click", "selector": "#su", "description": f"点击{primary_engine['display_name']}搜索按钮"})
-            
-            steps.extend([
-                {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
-                {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
-            ])
-            
-            optimized_search = {
-                "steps": steps,
-                "description": f"在{primary_engine['display_name']}上搜索: {search_keywords}"
-            }
-            self.logger.debug(f"_try_simple_heuristics: 返回优化的搜索引擎搜索指令")
-            return optimized_search
-
-        # 如果当前已在某个页面上，则检查是否为已知站点的简单操作
-        self.logger.debug(f"_try_simple_heuristics: 检查已知站点操作")
-        simple_action = self._maybe_build_known_site_action(user_text, page_data)
-        if simple_action:
-            self.logger.debug(f"_try_simple_heuristics: 返回已知站点操作")
-            return simple_action
-
-        self.logger.debug(f"_try_simple_heuristics: 未找到适合的简单启发式规则")
+        # 3. 搜索意图（页面为空时）
+        is_search = self._intent_is_search(user_text)
+        is_page_empty = not page_data or not page_data.get("is_valid", True)
+        if is_search and is_page_empty:
+            return self._build_search_instruction(user_text)
+        
+        # 4. 已知站点的操作
+        if page_data and page_data.get("is_valid"):
+            return self._maybe_build_known_site_action(user_text, page_data)
+        
         return None
+    
+    def _build_search_instruction(self, user_text: str) -> Dict[str, Any]:
+        """构建搜索引擎搜索指令"""
+        from src.common.search_engines import get_primary_search_engine
+        search_keywords = self._extract_search_keywords(user_text)
+        primary_engine = get_primary_search_engine()
+        
+        steps = [
+            {"action": "navigate", "value": primary_engine["url"], "description": f"导航到{primary_engine['display_name']}首页"},
+            {"action": "wait", "value": 2000, "description": "等待页面加载(2秒)"},
+            {"action": "wait", "selector": primary_engine["search_box_selector"], "timeout": 5000, "description": f"等待{primary_engine['display_name']}搜索框加载"},
+            {"action": "fill", "selector": primary_engine["search_box_selector"], "value": search_keywords, "description": f"在搜索框输入'{search_keywords}'"},
+        ]
+        
+        # 添加提交步骤
+        if primary_engine["submit_method"] == "enter_key":
+            steps.append({"action": "key", "selector": primary_engine["search_box_selector"], "value": "Enter", "description": "按回车键执行搜索"})
+        else:
+            steps.append({"action": "click", "selector": "#su", "description": f"点击{primary_engine['display_name']}搜索按钮"})
+        
+        steps.extend([
+            {"action": "wait", "value": 3000, "description": "等待搜索结果加载"},
+            {"action": "extract_results", "extraction_type": "auto", "description": "提取搜索结果"}
+        ])
+        
+        return {"steps": steps, "description": f"在{primary_engine['display_name']}上搜索: {search_keywords}"}
 
     def _analyze_context(self, user_text: str, page_data: Dict[str, Any], 
                         conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
@@ -470,33 +301,6 @@ class InstructionBuilder:
         matches = pattern.findall(text or "")
         return [match.strip() for match in matches]
 
-    def _maybe_build_navigation_first(self, user_text: str) -> Optional[Dict[str, Any]]:
-        """在页面为空时，尝试仅生成导航步骤（URL 直达）。"""
-        url = self._detect_navigation_intent_and_url(user_text)
-        if not url:
-            return None
-        # Note: URL validation removed - no domain filtering
-        return {
-            "steps": [
-                {"action": "navigate", "value": url, "description": f"导航到 {url}"},
-                {"action": "wait", "value": 2000, "description": "等待页面就绪(2秒)"}
-            ],
-            "description": f"前置导航到 {url} 并等待页面加载"
-        }
-
-    def _build_bing_pre_search(self, user_text: str) -> Dict[str, Any]:
-        """当无法直达 URL 时，先在 Bing 搜索预检索站点/意图。"""
-        from urllib.parse import quote_plus
-        query = quote_plus(user_text.strip())
-        url = f"https://www.bing.com/search?q={query}"
-        # Note: URL validation removed - no domain filtering
-        return {
-            "steps": [
-                {"action": "navigate", "value": url, "description": f"在Bing搜索：{user_text}"},
-                {"action": "wait", "value": 2000, "description": "等待搜索结果加载(2秒)"}
-            ],
-            "description": "前置导航到Bing进行检索"
-        }
 
     def _intent_is_search(self, instruction: str) -> bool:
         return bool(re.search(r"(搜索|搜搜|查询|找|新闻|news|search|哪些|什么|怎么样|如何|情况|多少|现在|是什么|怎样|天气|日天)", instruction, re.IGNORECASE))
@@ -546,8 +350,13 @@ class InstructionBuilder:
             self.logger.error(f"在已知站点（如百度/Bing/Google）上生成搜索动作的启发式异常: {e}")
             return None
 
-    def _call_llm(self, prompt: str) -> Dict[str, Any]:
-        """调用LLM生成指令，带有智能降级策略"""
+    def _call_llm(self, prompt: str, user_text: str = None) -> Dict[str, Any]:
+        """调用LLM生成指令，带有智能降级策略
+        
+        Args:
+            prompt: LLM提示词
+            user_text: 用户原始文本，用于降级时的启发式生成
+        """
         import time
         
         self.logger.debug("_call_llm: 开始调用 LLM")
@@ -556,7 +365,7 @@ class InstructionBuilder:
         available_providers = self.llm_manager.get_available_providers()
         if not available_providers:
             self.logger.warning("没有配置任何LLM提供商，使用内置启发式")
-            return self._fallback_instruction_generation(prompt)
+            return self._fallback_instruction_generation(user_text or prompt)
             
         try:
             # 获取配置的LLM提供商和模型
@@ -611,23 +420,31 @@ class InstructionBuilder:
                     error_message=str(e)
                 )
                 self.logger.warning(f"_call_llm: LLM返回无效JSON，使用启发式降级: {e}")
-                return self._fallback_instruction_generation(prompt)
+                return self._fallback_instruction_generation(user_text or prompt)
                 
         except Exception as e:
             # 确保llm_provider已定义
             if 'llm_provider' not in locals():
                 llm_provider = "unknown"
             self.logger.error(f"_call_llm: 调用{llm_provider}失败: {e}，使用启发式降级") 
-            return self._fallback_instruction_generation(prompt)
+            return self._fallback_instruction_generation(user_text or prompt)
     
-    def _fallback_instruction_generation(self, prompt: str) -> Dict[str, Any]:
-        """当LLM不可用时的启发式指令生成"""
-        # 从prompt中提取用户指令
-        user_instruction_match = re.search(r"用户指令: (.+)", prompt)
-        if not user_instruction_match:
-            return {"action": "error", "error": "无法解析用户指令"}
-            
-        user_instruction = user_instruction_match.group(1).strip()
+    def _fallback_instruction_generation(self, user_input: str) -> Dict[str, Any]:
+        """当LLM不可用时的启发式指令生成
+        
+        Args:
+            user_input: 用户输入文本或prompt字符串
+        """
+        # 如果输入是字符串且包含"用户指令:"，尝试提取
+        if isinstance(user_input, str) and "用户指令:" in user_input:
+            user_instruction_match = re.search(r"用户指令: (.+)", user_input)
+            if user_instruction_match:
+                user_instruction = user_instruction_match.group(1).strip()
+            else:
+                user_instruction = user_input.strip()
+        else:
+            # 直接使用输入作为用户指令
+            user_instruction = str(user_input).strip() if user_input else ""
         
         # 检查用户指令是否为空
         if not user_instruction:
@@ -681,7 +498,12 @@ class InstructionBuilder:
             }
         
         # 基础操作检测
-        return self._detect_basic_action(user_instruction)
+        basic_action = self._detect_basic_action(user_instruction)
+        # 如果基础操作是默认的wait，说明无法识别指令，返回错误
+        if basic_action.get("action") == "wait" and basic_action.get("description") == "等待页面响应":
+            return {"action": "error", "error": "无法解析用户指令", "original_text": user_instruction}
+        
+        return basic_action
     
     def _extract_search_keywords(self, instruction: str) -> str:
         """更智能地提取搜索关键词"""

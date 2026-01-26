@@ -121,39 +121,37 @@ class CLIInterface:
         """处理用户自然语言文本"""
         try:
             print("[执行中...]")
-
-            # 执行自然语言文本，这里会将文本转换为可执行的JSON指令
             result = self.agent.execute(text, self.session_state)
-
-            # 显示结果
-            if result.get("success", False):
-                message = result.get("message", "执行成功")
-                
-                # 检查是否有意图感知的响应
-                intent_info = result.get("intent_info")
-                if intent_info and intent_info.get("intent_type") == "SUMMARY_INFO":
-                    # 对于摘要信息意图（如天气查询），显示格式化的自然语言回复
-                    print(f"✅ {message}")
-                else:
-                    print(f"✅ {message}")
-                    
-                # 如果有提取的内容，显示更友好的输出
-                # 但对于摘要信息意图，如果已经有格式化的消息，就不显示原始内容
-                if not (intent_info and intent_info.get("intent_type") == "SUMMARY_INFO" and message and message != "执行成功"):
-                    content = result.get("content") or result.get("extracted_content")
-                    if content:
-                        self._display_extracted_content(content)
+            
+            if result.get("success"):
+                self._display_success(result)
             else:
-                error_msg = result.get('error', '未知错误')
-                print(f"❌ 执行失败: {error_msg}")
-
+                print(f"❌ 执行失败: {result.get('error', '未知错误')}")
+            
             # 更新会话状态
             if "session_state" in result:
                 self.session_state.update(result["session_state"])
-
         except Exception as e:
             self.logger.error(f"处理自然语言文本时发生错误: {str(e)}")
             print(f"❌ 处理自然语言文本时发生错误: {str(e)}")
+    
+    def _display_success(self, result: Dict[str, Any]):
+        """显示成功结果"""
+        message = result.get("message", "执行成功")
+        print(f"✅ {message}")
+        
+        # 显示提取的内容（除非是摘要信息且已有格式化消息）
+        intent_info = result.get("intent_info")
+        should_show_content = not (
+            intent_info and 
+            intent_info.get("intent_type") == "SUMMARY_INFO" and 
+            message and message != "执行成功"
+        )
+        
+        if should_show_content:
+            content = result.get("content") or result.get("extracted_content")
+            if content:
+                self._display_extracted_content(content)
     
     def _display_extracted_content(self, content):
         """显示提取的内容，格式化输出"""
