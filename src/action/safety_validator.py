@@ -83,6 +83,3 @@ class SafetyValidator:
             s = s.replace("import", "").replace("__", "_")
         return s
 
-
-
-

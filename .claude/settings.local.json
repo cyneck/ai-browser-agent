@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/unit/test_llm_manager.py -v --tb=short)",
+      "Bash(poetry run pytest tests/unit/test_llm_manager.py -v --tb=short)",
+      "Bash(poetry run pytest tests/unit/test_instruction_builder.py -v --tb=short)",
+      "Bash(poetry run pytest tests/unit/test_action_safety.py -v --tb=short)",
+      "Bash(poetry run pytest tests/unit/ -v --tb=short)",
+      "Bash(poetry run pytest tests/unit/ -v --ignore=tests/unit/test_action_executor.py --ignore=tests/unit/test_action_executor_behavior.py)",
+      "Bash(poetry run python -c \":*)"
+    ]
+  }
+}

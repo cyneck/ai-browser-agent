@@ -70,26 +70,41 @@ class PluginManager:
     
     def __init__(self, plugin_dir: Optional[str] = None):
         """初始化插件管理器
-        
+
         Args:
             plugin_dir: 插件目录路径，默认为当前文件所在目录
         """
         self.logger = get_logger()
-        
+
         # 设置插件目录
         if plugin_dir is None:
             self.plugin_dir = Path(__file__).parent
         else:
             self.plugin_dir = Path(plugin_dir)
-        
+
         # 插件字典，键为插件名称，值为插件实例
         self.plugins: Dict[str, Plugin] = {}
         # 网站插件列表
         self.website_plugins: List[BaseWebsitePlugin] = []
-        
+
+        # 搜索引擎优先级配置
+        self.search_engine_priority = ["google", "bing", "baidu"]
+
         # 加载插件
         self.load_plugins()
-    
+
+    def set_search_engine_priority(self, engines: List[str]):
+        """设置搜索引擎优先级
+
+        Args:
+            engines: 搜索引擎名称列表，按优先级排序
+        """
+        self.search_engine_priority = engines
+
+    def get_search_engine_priority(self) -> List[str]:
+        """获取当前搜索引擎优先级"""
+        return self.search_engine_priority
+
     def load_plugins(self):
         """加载插件目录中的所有插件"""
         self.logger.info(f"从 {self.plugin_dir} 加载插件")
@@ -209,44 +224,7 @@ class PluginManager:
         for plugin in self.website_plugins:
             all_mappings.update(plugin.get_site_name_mapping())
         return all_mappings
-    
-    def __init__(self, plugin_dir: Optional[str] = None):
-        """初始化插件管理器
-        
-        Args:
-            plugin_dir: 插件目录路径，默认为当前文件所在目录
-        """
-        self.logger = get_logger()
-        
-        # 设置插件目录
-        if plugin_dir is None:
-            self.plugin_dir = Path(__file__).parent
-        else:
-            self.plugin_dir = Path(plugin_dir)
-        
-        # 插件字典，键为插件名称，值为插件实例
-        self.plugins: Dict[str, Plugin] = {}
-        # 网站插件列表
-        self.website_plugins: List[BaseWebsitePlugin] = []
-        
-        # 搜索引擎优先级配置
-        self.search_engine_priority = ["google", "bing", "baidu"]
-        
-        # 加载插件
-        self.load_plugins()
-    
-    def set_search_engine_priority(self, engines: List[str]):
-        """设置搜索引擎优先级
-        
-        Args:
-            engines: 搜索引擎名称列表，按优先级排序
-        """
-        self.search_engine_priority = engines
-    
-    def get_search_engine_priority(self) -> List[str]:
-        """获取当前搜索引擎优先级"""
-        return self.search_engine_priority
-    
+
     def build_instruction_with_fallback(self, user_text: str, target_url: str) -> Optional[Dict[str, Any]]:
         """
         为指定网站构建指令，如果网站存在访问限制则使用搜索引擎优先级配置。
